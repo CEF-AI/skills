@@ -77,15 +77,20 @@ interface GarSignerCapable {
 
 ---
 
-## SDK v0.0.6 Limitation
+## GAR URL (v0.0.9+)
 
-The published SDK sends agreement requests to `{agentRuntimeUrl}/api/v1/agreements`. If GAR runs on a separate URL, you need an nginx proxy:
+Since v0.0.9, `garUrl` is a first-class config option. **It's required** — calling any agreement method without `garUrl` throws:
 
-```nginx
-location /api/v1/agreements {
-    rewrite ^/api/v1/agreements(.*)$ /agreements$1 break;
-    proxy_pass http://gar-service:3000;
-}
+```
+Error: GAR is a separate service. Configure garUrl when creating the client for agreement operations.
 ```
 
-A `garUrl` option exists on a feature branch but isn't published yet.
+```typescript
+const sdk = new ClientSdk({
+  url: 'https://cluster.cere.network',
+  garUrl: 'https://gar.cere.network',  // ← required for agreements
+  // ...
+});
+```
+
+Agreements are sent to `{garUrl}/api/v1/agreements`. No nginx proxy workaround needed.

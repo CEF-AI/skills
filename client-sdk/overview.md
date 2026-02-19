@@ -1,6 +1,6 @@
 # Client SDK — Connecting to Agent Services
 
-Package: `@cef-ai/client-sdk` (npm)
+Package: `@cef-ai/client-sdk` v0.0.9 (npm)
 
 The client SDK is for **external applications** that connect to CEF agent services — sending events, subscribing to streams, managing agreements, and querying cubbies.
 
@@ -23,6 +23,7 @@ import { ClientSdk, ClientContext } from '@cef-ai/client-sdk';
 
 const sdk = new ClientSdk({
   url: 'https://your-cluster.cere.network',
+  garUrl: 'https://your-gar-service.cere.network', // required for agreement operations
   context: {
     agent_service: 'your-agent-service-pub-key',
     workspace: 'your-workspace-id',
@@ -54,6 +55,7 @@ const sdk = new ClientSdk({
 ```typescript
 const sdk = new ClientSdk({
   url: 'https://cluster.cere.network',        // Base cluster URL
+  garUrl: 'https://gar.cere.network',         // GAR service URL (required for agreements)
   eventRuntimeUrl: 'https://event.cere.net',   // Optional: override event runtime
   agentRuntimeUrl: 'https://agent.cere.net',   // Optional: override agent runtime
   sisUrl: 'https://sis.cere.net',              // Optional: override SIS
@@ -62,6 +64,6 @@ const sdk = new ClientSdk({
 });
 ```
 
-If not provided, all URLs default to `{url}/event`, `{url}/agent`, `{url}/sis`, `{url}:4433`.
+If not provided, URLs default to `{url}/event`, `{url}/agent`, `{url}/sis`, `{url}:4433`.
 
-**Note (v0.0.6):** There's no `garUrl` in the published SDK. If GAR runs on a different URL than the agent runtime, use an nginx proxy to split `/api/v1/agreements` → GAR and everything else → agent runtime.
+**`garUrl` is required for agreement operations.** Since v0.0.9, the SDK throws if you call `agreement.create/update/revoke` without setting `garUrl`. GAR is a separate service from the agent runtime — no nginx proxy workaround needed anymore.
