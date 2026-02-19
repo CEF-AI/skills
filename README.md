@@ -1,36 +1,63 @@
 # CEF Intelligence
 
-Reference documentation for building agent services on the Cere CEF stack.
+Reference documentation for building and connecting to agent services on the Cere CEF stack.
 
-When you describe an agent service you want to build, I reference this folder to understand the APIs, patterns, data structures, and hierarchy — then build it correctly.
+## Two Sides
+
+### 🔧 Building Agent Services (handler code that runs inside CEF)
+- `api-reference/` — CEFContext, Cubby, Streams, Agent-to-Agent APIs
+- `patterns/` — Handler, Cubby, Fan-out, Feedback loop, RAFT indexer
+- `data-structures/` — TypeScript types, hierarchy model
+- `examples/` — Production-validated handlers from razzmatazz
+
+### 🔌 Connecting to Agent Services (client SDK for external apps)
+- `client-sdk/` — `@cef-ai/client-sdk` usage: events, streams, agreements, queries, wallets
+
+---
 
 ## Structure
 
 ```
 intelligence/
-├── api-reference/
-│   ├── cef-context.md        # CEFContext, CEFEvent — the runtime injected into handlers
-│   ├── cubby-api.md          # Cubby JSON, Vector, KV, Archive APIs
-│   ├── streams-api.md        # Stream subscribe, event patterns
-│   └── agent-to-agent.md     # Dynamic proxy pattern for inter-agent calls
-├── patterns/
-│   ├── handler-pattern.md    # How to write a CEF handler (handle(event, context))
-│   ├── cubby-patterns.md     # Key schemas, TTL, namespace conventions
-│   ├── fan-out-pattern.md    # Engagement → N agents → consensus
-│   ├── feedback-loop.md      # Human-in-the-loop RLHF pattern
-│   └── raft-indexer.md       # Stream → classify → pre-index for agents
-├── data-structures/
-│   ├── cef-types.ts          # All CEF TypeScript interfaces
-│   └── hierarchy.md          # Agent Service → Workspace → Stream → Deployment → Engagement
-├── examples/
-│   ├── eval-handler.ts       # Multi-model FAQ evaluator
-│   ├── engagement-handler.ts # Event dispatcher with fan-out + consensus
-│   ├── feedback-handler.ts   # Human feedback → score update
-│   ├── cubby-helpers.ts      # Typed cubby wrappers with key builders
-│   └── cubby-deltas.ts       # Change detection via content hashing
+├── api-reference/              ← CEF runtime APIs (inside handlers)
+│   ├── cef-context.md
+│   ├── cubby-api.md
+│   ├── streams-api.md
+│   └── agent-to-agent.md
+├── patterns/                   ← Reusable patterns
+│   ├── handler-pattern.md
+│   ├── cubby-patterns.md
+│   ├── fan-out-pattern.md
+│   ├── feedback-loop.md
+│   └── raft-indexer.md
+├── data-structures/            ← Types and hierarchy
+│   ├── cef-types.ts
+│   └── hierarchy.md
+├── examples/                   ← Real handler code
+│   ├── eval-handler.ts
+│   ├── engagement-handler.ts
+│   ├── feedback-handler.ts
+│   ├── cubby-helpers.ts
+│   └── cubby-deltas.ts
+├── client-sdk/                 ← External connection (npm SDK)
+│   ├── overview.md
+│   ├── events.md
+│   ├── streams.md
+│   ├── agreements.md
+│   ├── queries.md
+│   └── wallets.md
 └── README.md
 ```
 
-## Source
+## Usage
 
-Extracted from [cere-io/razzmatazz](https://github.com/cere-io/razzmatazz) — a production-validated eval system on CEF.
+When you describe an agent service:
+1. I read the relevant docs from this folder
+2. Build handler code using the patterns and API reference
+3. Build client code using the SDK docs
+4. Wire it all together with proper types, signing, and error handling
+
+## Sources
+
+- Handler/runtime: [cere-io/razzmatazz](https://github.com/cere-io/razzmatazz) (production-validated)
+- Client SDK: [@cef-ai/client-sdk](https://www.npmjs.com/package/@cef-ai/client-sdk) v0.0.6
