@@ -1,0 +1,133 @@
+# Real-Time Analytics Template
+# Use when: the goal involves continuous stream processing with analytics (sensor data, user events, IoT)
+# Patterns: stream-processor + fan-out-aggregate + cubby-state-machine + inference-worker
+# Models: Varies by domain (detection, classification, embedding, LLM)
+
+agentServicePubKey: "0x..."
+
+engagements:
+  - name: "Analytics Engine"
+    description: "Subscribes to event stream and runs real-time analytics"
+    file: ./engagements/analytics-engine.ts
+    version: "1.0.0"
+
+agents:
+  - name: "Feature Extractor"
+    alias: "featureExtractor"
+    description: "Extracts features from raw data"
+    version: "1.0.0"
+    tasks:
+      - name: "Extract"
+        alias: "extract"
+        file: ./agents/feature-extractor/tasks/extract.ts
+        parameters:
+          properties:
+            data:
+              type: object
+          required:
+            - data
+          type: object
+        returns:
+          properties:
+            features:
+              type: object
+          type: object
+
+  - name: "Classifier"
+    alias: "classifier"
+    description: "Classifies features into categories"
+    version: "1.0.0"
+    tasks:
+      - name: "Classify"
+        alias: "classify"
+        file: ./agents/classifier/tasks/classify.ts
+        parameters:
+          properties:
+            features:
+              type: object
+          required:
+            - features
+          type: object
+        returns:
+          properties:
+            category:
+              type: string
+            confidence:
+              type: number
+          type: object
+
+  - name: "Aggregator"
+    alias: "aggregator"
+    description: "Aggregates results over time windows"
+    version: "1.0.0"
+    tasks:
+      - name: "Aggregate"
+        alias: "aggregate"
+        file: ./agents/aggregator/tasks/aggregate.ts
+        parameters:
+          properties:
+            entityId:
+              type: string
+            newResult:
+              type: object
+          required:
+            - entityId
+            - newResult
+          type: object
+        returns:
+          properties:
+            summary:
+              type: object
+            windowCount:
+              type: number
+          type: object
+
+cubbies:
+  - name: "analytics"
+    description: "Real-time analytics state and aggregated results"
+    dataTypes:
+      - json
+      - search
+    queries:
+      - name: "getAnalytics"
+        file: ./queries/get-analytics.ts
+        parameters:
+          properties:
+            entityId:
+              type: string
+            mode:
+              type: string
+            startTime:
+              type: number
+            endTime:
+              type: number
+          required:
+            - entityId
+          type: object
+        returns:
+          properties:
+            success:
+              type: boolean
+            data:
+              type: object
+          type: object
+
+workspaces:
+  - name: "Analytics"
+    description: "Real-time analytics workspace"
+    streams:
+      - name: "Event Stream"
+        description: "Continuous event data"
+        selectors:
+          - name: "all"
+            conditions:
+              - "*"
+        deployments:
+          - name: "Analytics Pipeline"
+            description: "Real-time event analysis"
+            engagement: "Analytics Engine"
+            isActive: true
+            triggers:
+              - name: "all-events"
+                conditions:
+                  - "*"

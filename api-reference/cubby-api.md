@@ -164,3 +164,12 @@ meta:last_run:{agentId}          → per-agent run metadata
 Use different cubbies for different TTL/access patterns:
 - `sot-intermediate` — short TTL (1h), job results
 - `sot-archive` — permanent, versioned history
+
+## Key Naming Restrictions
+
+- **No colons in keys.** Use `/` as separator instead.
+- ✅ `complaints/2024-01-01`
+- ✅ `player/abc/match/123`
+- ❌ `complaints:2024-01-01`
+- ❌ `faq:001/agent:gemini`
+

@@ -1,0 +1,159 @@
+# NLP Pipeline Template
+# Use when: the goal involves text/audio processing (transcription, sentiment, classification, summarization)
+# Patterns: pipeline-chain + inference-worker + cubby-state-machine
+# Models: Whisper (STT), Qwen3 (embeddings), sentiment models, LLM (reasoning)
+
+agentServicePubKey: "0x..."
+
+engagements:
+  - name: "NLP Orchestrator"
+    description: "Processes text/audio through NLP pipeline"
+    file: ./engagements/orchestrator.ts
+    version: "1.0.0"
+
+agents:
+  - name: "Speech To Text"
+    alias: "speechToText"
+    description: "Whisper Large v3 audio transcription"
+    version: "1.0.0"
+    tasks:
+      - name: "Transcribe"
+        alias: "transcribe"
+        file: ./agents/speech-to-text/tasks/transcribe.ts
+        parameters:
+          properties:
+            audio:
+              type: string
+            audioFormat:
+              type: string
+          required:
+            - audio
+          type: object
+        returns:
+          properties:
+            fullText:
+              type: string
+            segments:
+              type: array
+            processingTime:
+              type: number
+          type: object
+
+  - name: "Text Analyzer"
+    alias: "textAnalyzer"
+    description: "Sentiment and classification"
+    version: "1.0.0"
+    tasks:
+      - name: "Analyze"
+        alias: "analyze"
+        file: ./agents/text-analyzer/tasks/analyze.ts
+        parameters:
+          properties:
+            text:
+              type: string
+          required:
+            - text
+          type: object
+        returns:
+          properties:
+            sentiment:
+              type: number
+            emotion:
+              type: string
+            confidence:
+              type: number
+          type: object
+
+  - name: "Embedding"
+    alias: "embeddingAgent"
+    description: "Qwen3-Embedding-4B text embeddings"
+    version: "1.0.0"
+    tasks:
+      - name: "Embed"
+        alias: "embed"
+        file: ./agents/embedding/tasks/embed.ts
+        parameters:
+          properties:
+            texts:
+              type: array
+          required:
+            - texts
+          type: object
+        returns:
+          properties:
+            embeddings:
+              type: array
+          type: object
+
+  - name: "Classifier"
+    alias: "classifier"
+    description: "LLM-based text classification"
+    version: "1.0.0"
+    tasks:
+      - name: "Classify"
+        alias: "classify"
+        file: ./agents/classifier/tasks/classify.ts
+        parameters:
+          properties:
+            text:
+              type: string
+            categories:
+              type: array
+          required:
+            - text
+          type: object
+        returns:
+          properties:
+            category:
+              type: string
+            confidence:
+              type: number
+            reasoning:
+              type: string
+          type: object
+
+cubbies:
+  - name: "nlpResults"
+    description: "Processed text results and embeddings"
+    dataTypes:
+      - json
+      - search
+    queries:
+      - name: "getResults"
+        file: ./queries/get-results.ts
+        parameters:
+          properties:
+            entityId:
+              type: string
+            mode:
+              type: string
+          required:
+            - entityId
+          type: object
+        returns:
+          properties:
+            success:
+              type: boolean
+            data:
+              type: object
+          type: object
+
+workspaces:
+  - name: "NLP Processing"
+    description: "Text and audio processing workspace"
+    streams:
+      - name: "Input Stream"
+        description: "Text and audio input events"
+        selectors:
+          - name: "all"
+            conditions:
+              - "*"
+        deployments:
+          - name: "NLP Pipeline"
+            description: "Process inputs through NLP agents"
+            engagement: "NLP Orchestrator"
+            isActive: true
+            triggers:
+              - name: "all-events"
+                conditions:
+                  - "*"

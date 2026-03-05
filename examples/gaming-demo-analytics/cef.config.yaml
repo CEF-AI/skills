@@ -1,0 +1,236 @@
+agentServicePubKey: "0x..."
+
+engagements:
+  - name: "Gaming Concierge"
+    description: "Orchestrates player audio and game data analysis"
+    file: ./engagements/concierge.ts
+    version: "1.0.0"
+
+agents:
+  - name: "Speech To Text"
+    alias: "speechToTextAgent"
+    description: "Whisper Large v3 audio transcription"
+    version: "1.0.0"
+    tasks:
+      - name: "Transcribe"
+        alias: "transcribe"
+        file: ./agents/speech-to-text/tasks/transcribe.ts
+        parameters:
+          properties:
+            audio:
+              type: string
+            audioFormat:
+              type: string
+          required:
+            - audio
+          type: object
+        returns:
+          properties:
+            fullText:
+              type: string
+            segments:
+              type: array
+            processingTime:
+              type: number
+            wordCount:
+              type: number
+          type: object
+
+  - name: "Sentiment"
+    alias: "sentimentAgent"
+    description: "Dual-model sentiment polarity + emotion classification"
+    version: "1.0.0"
+    tasks:
+      - name: "Analyze"
+        alias: "analyze"
+        file: ./agents/sentiment/tasks/analyze.ts
+        parameters:
+          properties:
+            text:
+              type: string
+          required:
+            - text
+          type: object
+        returns:
+          properties:
+            sentiment:
+              type: number
+            emotion:
+              type: string
+            confidence:
+              type: number
+          type: object
+
+  - name: "Embedding"
+    alias: "embeddingAgent"
+    description: "Qwen3-Embedding-4B text embeddings (1536d)"
+    version: "1.0.0"
+    tasks:
+      - name: "Embed"
+        alias: "embed"
+        file: ./agents/embedding/tasks/embed.ts
+        parameters:
+          properties:
+            texts:
+              type: array
+          required:
+            - texts
+          type: object
+        returns:
+          properties:
+            embeddings:
+              type: array
+          type: object
+
+  - name: "Topic"
+    alias: "topicAgent"
+    description: "Topic matching, creation, and updates"
+    version: "1.0.0"
+    tasks:
+      - name: "Match Topic"
+        alias: "matchTopic"
+        file: ./agents/topic/tasks/match-topic.ts
+        parameters:
+          properties:
+            embedding:
+              type: array
+            playerId:
+              type: string
+            threshold:
+              type: number
+          required:
+            - embedding
+            - playerId
+          type: object
+        returns:
+          properties:
+            topicId:
+              type: string
+            similarity:
+              type: number
+          type: object
+      - name: "Create Topic"
+        alias: "createTopic"
+        file: ./agents/topic/tasks/create-topic.ts
+        parameters:
+          properties:
+            playerId:
+              type: string
+            centroid:
+              type: array
+            sampleTexts:
+              type: array
+            initialSentiment:
+              type: number
+            initialConfidence:
+              type: number
+            initialMentionCount:
+              type: number
+          required:
+            - playerId
+            - centroid
+          type: object
+        returns:
+          properties:
+            topicId:
+              type: string
+          type: object
+      - name: "Update Topic"
+        alias: "updateTopic"
+        file: ./agents/topic/tasks/update-topic.ts
+        parameters:
+          properties:
+            playerId:
+              type: string
+            topicId:
+              type: string
+            embedding:
+              type: array
+            sentiment:
+              type: number
+            confidence:
+              type: number
+          required:
+            - playerId
+            - topicId
+          type: object
+
+  - name: "Clustering"
+    alias: "clusteringAgent"
+    description: "HDBSCAN embedding clustering"
+    version: "1.0.0"
+    tasks:
+      - name: "Cluster"
+        alias: "cluster"
+        file: ./agents/clustering/tasks/cluster.ts
+        parameters:
+          properties:
+            embeddings:
+              type: array
+            config:
+              type: object
+          required:
+            - embeddings
+          type: object
+        returns:
+          properties:
+            labels:
+              type: array
+            clusterCount:
+              type: number
+            clusterSizes:
+              type: array
+          type: object
+
+  - name: "Pattern"
+    alias: "patternAgent"
+    description: "LLM-based behavioral pattern classification"
+    version: "1.0.0"
+    tasks:
+      - name: "Analyze Batch"
+        alias: "analyzeBatch"
+        file: ./agents/pattern/tasks/analyze-batch.ts
+        parameters:
+          properties:
+            playerId:
+              type: string
+            matchId:
+              type: string
+            accumulatedKeyEvents:
+              type: array
+          required:
+            - playerId
+            - matchId
+          type: object
+        returns:
+          properties:
+            eventsProcessed:
+              type: number
+          type: object
+
+cubbies:
+  - name: "gameDemo"
+    description: "Player topic trees, utterances, game moments, and pattern analysis"
+    dataTypes:
+      - json
+      - search
+
+workspaces:
+  - name: "Gaming"
+    description: "Gaming analytics workspace"
+    streams:
+      - name: "Player Events"
+        description: "Player audio and game data events"
+        selectors:
+          - name: "all"
+            conditions:
+              - "*"
+        deployments:
+          - name: "Player Analytics"
+            description: "Real-time player analysis"
+            engagement: "Gaming Concierge"
+            isActive: true
+            triggers:
+              - name: "all-events"
+                conditions:
+                  - "*"

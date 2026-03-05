@@ -1,0 +1,83 @@
+# Object Detection Template
+# Use when: the goal involves detecting objects in images/video (cars, people, animals, etc.)
+# Patterns: concierge-orchestrator + inference-worker + cubby-state-machine
+# Models: YOLO11x (or custom detection model)
+
+agentServicePubKey: "0x..."
+
+engagements:
+  - name: "Detection Orchestrator"
+    description: "Receives image/video events and dispatches to detection agents"
+    file: ./engagements/orchestrator.ts
+    version: "1.0.0"
+
+agents:
+  - name: "Object Detection"
+    alias: "objectDetection"
+    description: "YOLO-based object detection"
+    version: "1.0.0"
+    tasks:
+      - name: "Detect"
+        alias: "detect"
+        file: ./agents/object-detection/tasks/detect.ts
+        parameters:
+          properties:
+            image:
+              type: string
+          required:
+            - image
+          type: object
+        returns:
+          properties:
+            totalDetections:
+              type: number
+            detections:
+              type: array
+            processingTime:
+              type: number
+          type: object
+
+cubbies:
+  - name: "detections"
+    description: "Stores detection results"
+    dataTypes:
+      - json
+    queries:
+      - name: "getDetections"
+        file: ./queries/get-detections.ts
+        parameters:
+          properties:
+            entityId:
+              type: string
+            mode:
+              type: string
+          required:
+            - entityId
+          type: object
+        returns:
+          properties:
+            success:
+              type: boolean
+            data:
+              type: object
+          type: object
+
+workspaces:
+  - name: "Detection Site"
+    description: "Object detection workspace"
+    streams:
+      - name: "Image Stream"
+        description: "Incoming image/video events"
+        selectors:
+          - name: "imageEvents"
+            conditions:
+              - "event_type:IMAGE_DATA"
+        deployments:
+          - name: "Detection Pipeline"
+            description: "Process images through detection"
+            engagement: "Detection Orchestrator"
+            isActive: true
+            triggers:
+              - name: "all-events"
+                conditions:
+                  - "*"
