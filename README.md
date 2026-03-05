@@ -80,9 +80,6 @@ intelligence/
 | Store | API | Use For |
 |-------|-----|---------|
 | **Cubby** | `context.cubby(name)` | Long-term state, agent-to-agent sharing, query-accessible data |
-| **RAFT KV** | `context.kv.*` | Stream-scoped ephemeral state: counters, flags, working memory |
-
-Rule of thumb: if another agent or a query needs to read it, use Cubby. If it's stream-scoped working memory, use RAFT KV.
 
 ---
 

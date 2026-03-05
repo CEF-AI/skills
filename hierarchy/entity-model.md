@@ -106,7 +106,7 @@ The main event handler — typically an orchestrator or "concierge" that receive
 | `file` | `string` | Relative path to the `.ts` handler file |
 | `version` | `string` | Semantic version (e.g., "1.0.0") |
 
-The engagement handler has full access to the CEF runtime: `context.cubby()`, `context.agents.*`, `context.streams.subscribe()`, `context.fetch()`, `context.kv.*`, and `context.log()`.
+The engagement handler has full access to the CEF runtime: `context.cubby()`, `context.agents.*`, `context.streams.subscribe()`, `context.fetch()`, and `context.log()`.
 
 Multiple engagements can exist in one agent service, each with their own agent graph. An engagement can also be standalone (no agents) for simple event processing.
 
@@ -181,23 +181,18 @@ async function handle(event: { payload: Record<string, unknown> }, context: CEFC
 ```
 
 - `event.payload` contains the input data (destructured by the handler)
-- `context` provides cubby, agents, streams, fetch, kv, and log APIs
+- `context` provides cubby, agents, streams, fetch, and log APIs
 - The return value is sent back to the caller (engagement or another agent)
 
-### Storage: RAFT KV vs Cubby
-
-Both are available but serve different purposes:
+### Storage: Cubby
 
 | Store | API | Use For | Scope |
 |-------|-----|---------|-------|
-| **RAFT KV** | `context.kv.*` | Stream-scoped ephemeral data: counters, flags, short-lived state | Tied to the event stream |
 | **Cubby** | `context.cubby(name)` | Long-term persistent data, agent-to-agent sharing, query-accessible state | Named store, cross-invocation |
 
-**Rule of thumb:** If another agent or a cubby query needs to read it, use Cubby. If it's stream-scoped working memory, use RAFT KV.
+### Inference via context.fetch()
 
-### Inference via context.fetch() only
-
-`context.models` is documented but NOT available in production. All model inference goes through `context.fetch()` to inference endpoints. See `models/inference-catalog.md`.
+All model inference goes through `context.fetch()` to inference endpoints. See `models/inference-catalog.md`.
 
 ---
 

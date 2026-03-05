@@ -148,25 +148,10 @@ Always wrap each parallel branch in `.catch()` to prevent one failure from abort
 
 ```typescript
 const [a, b, c] = await Promise.all([
-    agentA.doWork(payload).catch(err => ({ error: err.message })),
-    agentB.doWork(payload).catch(err => ({ error: err.message })),
-    agentC.doWork(payload).catch(err => ({ error: err.message }))
+    context.agents.agentA.doWork(payload).catch(err => ({ error: err.message })),
+    context.agents.agentB.doWork(payload).catch(err => ({ error: err.message })),
+    context.agents.agentC.doWork(payload).catch(err => ({ error: err.message }))
 ]);
-```
-
-### Dynamic fan-out
-
-Fan out to a dynamic number of agents:
-
-```typescript
-const agentAliases = ['evaluator_gemini', 'evaluator_llama', 'evaluator_claude'];
-
-const results = await Promise.all(
-    agentAliases.map(async (alias) => {
-        const agent = context.agents[alias];
-        return agent.evaluate(payload).catch((err: any) => ({ error: err.message }));
-    })
-);
 ```
 
 ### Parallel cubby reads

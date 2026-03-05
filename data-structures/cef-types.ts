@@ -30,11 +30,9 @@ export interface CEFEvent {
 export interface CEFContext {
     log(...args: unknown[]): void;
     cubby(name: string): CEFCubbyInstance;
-    kv: CEFKVClient;
     agents: CEFAgentClient;
     streams: CEFStreamsClient;
     fetch(url: string, options?: CEFFetchOptions): Promise<CEFFetchResponse>;
-    emit?(eventType: string, payload: Record<string, unknown>, targetId?: string): void;
     path?: { agentServicePubKey: string; workspaceId: string };
 }
 
@@ -91,19 +89,6 @@ export interface CEFCubbyVectorStore {
         options?: { limit?: number; filter?: Record<string, unknown> },
     ): Promise<Array<{ id: string; score: number; metadata?: Record<string, unknown> }>>;
     createIndex(config: { dimension: number }): Promise<void>;
-}
-
-// ─── RAFT KV (Redis-style) ────────────────────────────────────────────────
-
-export interface CEFKVClient {
-    hset(key: string, fields: Record<string, string>): Promise<void>;
-    hgetall(key: string): Promise<Record<string, string> | null>;
-    rpush(key: string, value: string): Promise<number>;
-    lrange(key: string, start: number, stop: number): Promise<string[]>;
-    ltrim(key: string, start: number, stop: number): Promise<void>;
-    incr(key: string): Promise<number>;
-    get(key: string): Promise<string | null>;
-    set(key: string, value: string): Promise<void>;
 }
 
 // ─── Agent-to-Agent ────────────────────────────────────────────────────────

@@ -22,20 +22,11 @@ interface CEFAgentClient {
 // Call another agent by its alias (set during deployment)
 const result = await context.agents.embeddingAgent.embed({ texts: ['hello'] });
 const topic = await context.agents.topicAgent.matchTopic({ embedding, threshold: 0.8 });
-
-// Fan-out to multiple agents
-const results = await Promise.all(
-  ['gemini', 'llama', 'claude'].map(async (agentId) => {
-    const agent = context.agents[`sotEvaluator_${agentId}`];
-    return agent.evaluateFaq(payload);
-  }),
-);
 ```
 
 ### How it works
 
-- Agent aliases are configured at deployment time
-- `context.agents` is a JavaScript Proxy — any property access returns another proxy
+- Agent aliases are configured at deployment time (use dot notation: `context.agents.<alias>.<task>(payload)`)
 - Method calls on the proxy trigger HTTP calls to the target agent's handler
 - The target agent receives the call as a normal `CEFEvent` with the method args as payload
 

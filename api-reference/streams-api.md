@@ -47,7 +47,6 @@ interface StreamEvent {
 |-----------|-------------|-------------|
 | `PAGE_CHANGE` | Wiki page edited | External webhook / RAFT |
 | `BATCH_EVAL` | Trigger batch re-evaluation | Manual / cron |
-| `EVAL_COMPLETE` | Agent finished evaluating | Eval handler via `context.emit()` |
 | `HUMAN_FEEDBACK` | Human scored an answer | Feedback UI |
 
 ### Event payload examples
@@ -62,31 +61,4 @@ interface StreamEvent {
   edited_by: 'brent',
   source_timestamp: '2026-02-17T10:00:00Z',
 }
-
-// EVAL_COMPLETE
-{
-  event_type: 'EVAL_COMPLETE',
-  agent_id: 'gemini',
-  trigger: 'd_abc123',
-  faqs_evaluated: 5,
-  avg_quality: 0.82,
-  duration_ms: 3400,
-}
 ```
-
----
-
-## Emit (Observability)
-
-```typescript
-// Only available if context.emit exists (not always in production)
-if (context.emit) {
-  context.emit('EVAL_COMPLETE', {
-    event_type: 'EVAL_COMPLETE',
-    agent_id: agentId,
-    faqs_evaluated: results.length,
-  });
-}
-```
-
-**Note:** `context.emit()` is documented but not verified in production. Always guard with `if (context.emit)`.
