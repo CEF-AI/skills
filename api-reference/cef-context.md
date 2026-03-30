@@ -45,7 +45,7 @@ interface CEFEvent {
 ```typescript
 interface CEFContext {
   log(...args: unknown[]): void;
-  cubby(name: string): CEFCubbyInstance;
+  cubbies: CEFCubbiesClient;          // SQLite databases keyed by alias
   agents: CEFAgentClient;             // dynamic proxy for agent-to-agent calls
   streams: CEFStreamsClient;
   fetch(url: string, options?: CEFFetchOptions): Promise<CEFFetchResponse>;
@@ -58,7 +58,7 @@ interface CEFContext {
 | Method | Status | Notes |
 |--------|--------|-------|
 | `context.log(msg)` | ✅ Verified | Single string arg |
-| `context.cubby(name)` | ✅ Verified | Factory → instance |
+| `context.cubbies.<alias>.query/exec()` | ✅ Verified | SQLite-backed, migration schema |
 | `context.agents.<name>.<method>` | ✅ Verified | Dot notation only (see agent-to-agent.md) |
 | `context.fetch(url, opts)` | ✅ Verified | Standard Response |
 | `context.streams.subscribe()` | ✅ Verified | Async iterable |

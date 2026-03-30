@@ -1,0 +1,20 @@
+{
+  "name": "@cef-ai/skills",
+  "version": "1.0.0",
+  "description": "AI coding skills for building agent services on the CEF AI stack",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cef-ai/skills.git"
+  },
+  "keywords": [
+    "ai-skills",
+    "cef",
+    "agents",
+    "claude-code",
+    "cursor",
+    "codex",
+    "cere"
+  ],
+  "license": "MIT",
+  "skills": "skills/"
+}

@@ -1,17 +1,15 @@
 # Cubby State Machine Pattern
 
-A cubby state machine reads existing state from cubby, processes new input, writes updated state back. This is the fundamental pattern for persistent state management in CEF agents.
-
-**Extracted from:** `Gaming Demo Agents/gameDataAgent.ts`, `Gaming Demo Agents/topicAgent/*`, `Gaming Demo Agents/conciergeAgent.ts`
+A cubby state machine reads existing state via SQL SELECT, processes new input, and writes updated state back via SQL INSERT/UPDATE. This is the fundamental pattern for persistent state management in CEF agents.
 
 ---
 
 ## When to Use
 
-- Agent needs to maintain state across invocations (e.g., a topic tree, match history, violation buffer)
+- Agent needs to maintain state across invocations (e.g. entity counters, accumulated records, violation buffers)
 - State grows incrementally with each event
-- Multiple agents read/write the same state (agent-to-agent sharing via cubby)
-- You need pattern-based key queries or time-series data
+- Multiple agents read/write the same state (shared cubby alias + instance)
+- You need queryable, structured data with indexes and constraints
 
 ---
 
@@ -19,10 +17,10 @@ A cubby state machine reads existing state from cubby, processes new input, writ
 
 ```
 Event arrives
-  → Read current state from cubby (with fallback for missing keys)
-  → Process input against current state
-  → Write updated state back to cubby
-  → Return result
+  -> SELECT current state from cubby (empty rows = no prior state)
+  -> Process input against current state
+  -> INSERT/UPDATE state back to cubby
+  -> Return result
 ```
 
 ---
@@ -30,54 +28,50 @@ Event arrives
 ## Inline Template
 
 ```typescript
-const CUBBY_NAME = 'my-domain';
-
-interface EntityState {
-    id: string;
-    count: number;
-    items: any[];
-    updatedAt: string;
-}
-
-function createEmptyState(id: string): EntityState {
-    return {
-        id,
-        count: 0,
-        items: [],
-        updatedAt: new Date().toISOString()
-    };
-}
-
-async function getOrCreate(key: string, id: string, cubby: any): Promise<EntityState> {
-    try {
-        const existing = await cubby.json.get(key);
-        if (existing) return existing;
-    } catch (_) {}
-    const empty = createEmptyState(id);
-    await cubby.json.set(key, empty);
-    return empty;
-}
-
-async function handle(event: any, context: any) {
+async function handle(event: any, ctx: any) {
     const { entityId, newItem } = event.payload;
-    const cubby = context.cubby(CUBBY_NAME);
+    const instanceId = entityId;
 
-    // Read
-    const key = `entity/${entityId}/state`;
-    const state = await getOrCreate(key, entityId, cubby);
+    // Read current state
+    const existing = await ctx.cubbies.my_domain.query(
+        instanceId,
+        'SELECT id, count, updated_at FROM entity_state WHERE id = ?',
+        [entityId]
+    );
 
-    // Process
-    state.items.push({
-        ...newItem,
-        addedAt: new Date().toISOString()
-    });
-    state.count = state.items.length;
-    state.updatedAt = new Date().toISOString();
+    const now = new Date().toISOString();
 
-    // Write
-    await cubby.json.set(key, state);
+    if (existing.rows.length === 0) {
+        // Initialize state
+        await ctx.cubbies.my_domain.exec(
+            instanceId,
+            'INSERT INTO entity_state (id, count, updated_at) VALUES (?, ?, ?)',
+            [entityId, 0, now]
+        );
+    }
 
-    return { count: state.count };
+    // Append item
+    await ctx.cubbies.my_domain.exec(
+        instanceId,
+        'INSERT INTO items (entity_id, data, added_at) VALUES (?, ?, ?)',
+        [entityId, JSON.stringify(newItem), now]
+    );
+
+    // Update count
+    await ctx.cubbies.my_domain.exec(
+        instanceId,
+        'UPDATE entity_state SET count = count + 1, updated_at = ? WHERE id = ?',
+        [now, entityId]
+    );
+
+    // Read back final count
+    const result = await ctx.cubbies.my_domain.query(
+        instanceId,
+        'SELECT count FROM entity_state WHERE id = ?',
+        [entityId]
+    );
+
+    return { count: result.rows[0][0] };
 }
 ```
 
@@ -85,118 +79,138 @@ async function handle(event: any, context: any) {
 
 ## Key Techniques
 
-### Safe reads with fallback
+### Safe reads
 
-Cubby reads may fail if the key doesn't exist. Always wrap in try/catch or use `exists()`:
-
-```typescript
-// Pattern 1: try/catch
-let data: any = null;
-try { data = await cubby.json.get(key); } catch (_) {}
-if (!data) data = defaultValue;
-
-// Pattern 2: exists() check
-const data = await cubby.json.exists(key) ? await cubby.json.get(key) : defaultValue;
-```
-
-### Append-to-array pattern
-
-Most common state mutation — append new items to an existing array:
+SELECT returns an empty `rows` array when no data exists. No try/catch needed.
 
 ```typescript
-const key = `player/${playerId}/match/${matchId}/utterances`;
-const existing = await cubby.json.exists(key) ? await cubby.json.get(key) : [];
-existing.push({
-    id: `${matchId}-${Date.now()}`,
-    text,
-    sentiment,
-    timestamp: new Date().toISOString()
-});
-await cubby.json.set(key, existing);
+const result = await ctx.cubbies.store.query(instanceId, 'SELECT * FROM items WHERE id = ?', [itemId]);
+const data = result.rows.length > 0 ? result.rows[0] : null;
 ```
 
-### Hierarchical key schema
+### Append pattern
 
-Organize cubby keys in a hierarchy that enables pattern queries:
-
-```
-entity/{entityId}/state               ← primary state
-entity/{entityId}/items/{timestamp}   ← time-series items
-entity/{entityId}/summary             ← computed summary
-```
-
-Query with glob patterns:
+Insert new rows into a table instead of pushing to an array.
 
 ```typescript
-const allItemKeys = await cubby.json.keys(`entity/${entityId}/items/*`);
+await ctx.cubbies.store.exec(
+    instanceId,
+    'INSERT INTO utterances (match_id, text, sentiment, created_at) VALUES (?, ?, ?, ?)',
+    [matchId, text, sentiment, new Date().toISOString()]
+);
 ```
 
-### CID-scoped state (test isolation)
-
-Use a correlation ID (CID) in the key path to isolate test runs from production:
+Query all items for an entity:
 
 ```typescript
-// Test mode: CID-scoped
-const key = mode === 'production'
-    ? `player/${playerId}/tree`
-    : `player/${playerId}/${cid}/tree`;
+const all = await ctx.cubbies.store.query(
+    instanceId,
+    'SELECT text, sentiment FROM utterances WHERE match_id = ? ORDER BY created_at',
+    [matchId]
+);
 ```
 
-### Deduplication via cubby
+### Instance-scoped isolation
 
-Prevent duplicate processing of events:
+Use instanceId to isolate data per entity. Each instanceId gets its own SQLite database.
 
 ```typescript
-const dedupKey = `processed/${eventId}`;
-const existing = await cubby.get(dedupKey).catch(() => null);
-if (existing) return { skipped: true, reason: 'duplicate' };
+// Production: per-player instance
+const instanceId = playerId;
+await ctx.cubbies.player_data.exec(instanceId, 'INSERT INTO scores ...', [...]);
+
+// Testing: per-test-run instance
+const instanceId = `test_${testRunId}`;
+await ctx.cubbies.player_data.exec(instanceId, 'INSERT INTO scores ...', [...]);
+```
+
+### Deduplication
+
+Prevent duplicate processing using SQL constraints.
+
+```typescript
+// Schema: CREATE TABLE processed (event_id TEXT PRIMARY KEY, processed_at TEXT)
+const check = await ctx.cubbies.store.query('SELECT 1 FROM processed WHERE event_id = ?', [eventId]);
+if (check.rows.length > 0) return { skipped: true, reason: 'duplicate' };
 
 // ... process event ...
 
-await cubby.set(dedupKey, JSON.stringify({ processedAt: Date.now() }));
+await ctx.cubbies.store.exec(
+    'INSERT OR IGNORE INTO processed (event_id, processed_at) VALUES (?, ?)',
+    [eventId, new Date().toISOString()]
+);
 ```
 
-### Buffered flush pattern
-
-Accumulate items in a buffer, then flush when a time window expires:
+### UPSERT for idempotent writes
 
 ```typescript
-const FLUSH_WINDOW_MS = 120000; // 2 minutes
+await ctx.cubbies.store.exec(
+    `INSERT INTO entity_state (id, count, updated_at) VALUES (?, 1, ?)
+     ON CONFLICT(id) DO UPDATE SET count = count + 1, updated_at = ?`,
+    [entityId, now, now]
+);
+```
 
-const bufKey = `entity/${entityId}/buffer`;
-let buf: any = null;
-try { buf = await cubby.json.get(bufKey); } catch (_) {}
-if (!buf || !Array.isArray(buf.entries)) {
-    buf = { startedAt: Date.now(), entries: [] };
+### Buffered flush
+
+Accumulate rows in a buffer table, flush when a time window expires.
+
+```typescript
+const FLUSH_WINDOW_MS = 120000;
+
+// Insert into buffer
+await ctx.cubbies.store.exec(
+    instanceId,
+    'INSERT INTO buffer (data, created_at) VALUES (?, ?)',
+    [JSON.stringify(entry), Date.now()]
+);
+
+// Check oldest entry
+const oldest = await ctx.cubbies.store.query(
+    instanceId, 'SELECT MIN(created_at) FROM buffer'
+);
+if (oldest.rows[0][0] && Date.now() - oldest.rows[0][0] >= FLUSH_WINDOW_MS) {
+    const buffered = await ctx.cubbies.store.query(
+        instanceId, 'SELECT data FROM buffer ORDER BY created_at'
+    );
+    await processBuffer(buffered.rows.map(r => JSON.parse(r[0])));
+    await ctx.cubbies.store.exec(instanceId, 'DELETE FROM buffer');
 }
+```
 
-buf.entries.push(newEntry);
-await cubby.json.set(bufKey, buf);
+### Time-series queries with SQL
 
-// Check if window expired
-const elapsed = Date.now() - buf.startedAt;
-if (elapsed >= FLUSH_WINDOW_MS && buf.entries.length > 0) {
-    // Flush: deduplicate, aggregate, persist
-    await processBuffer(buf.entries, cubby, context);
-    await cubby.json.set(bufKey, { startedAt: Date.now(), entries: [] });
-}
+Use SQL WHERE clauses instead of key pattern matching.
+
+```typescript
+// Range query
+const events = await ctx.cubbies.store.query(
+    instanceId,
+    'SELECT * FROM events WHERE ts BETWEEN ? AND ? ORDER BY ts',
+    [startTime, endTime]
+);
+
+// Latest N
+const recent = await ctx.cubbies.store.query(
+    instanceId,
+    'SELECT * FROM events ORDER BY ts DESC LIMIT ?',
+    [10]
+);
+
+// Aggregation
+const stats = await ctx.cubbies.store.query(
+    instanceId,
+    'SELECT COUNT(*) as total, AVG(score) as avg_score FROM events WHERE entity_id = ?',
+    [entityId]
+);
 ```
 
 ---
 
-## Production Example: Topic Tree
+## Schema Design Tips
 
-The gaming demo maintains a per-player topic tree in cubby. Topics are created from clustered embeddings, matched by cosine similarity, and updated with new data on each utterance:
-
-```
-player/{playerId}/tree                    ← PlayerTree with topics map
-player/{playerId}/match/{matchId}/utterances  ← Array of utterances with topicId backfill
-player/{playerId}/match/{matchId}/patterns    ← Pattern analysis results
-player/{playerId}/match/{matchId}/moments     ← Game event moments
-```
-
-State flow:
-1. `getOrCreateTree()` — read or initialize empty tree
-2. For each utterance: embed → match topic → update topic (or accumulate unassigned)
-3. At match end: cluster unassigned → create new topics → backfill topicIds
-4. `saveTree()` — write updated tree back with incremented matchCount
+- Use `INTEGER PRIMARY KEY` for auto-incrementing IDs
+- Add indexes on columns used in WHERE clauses and JOINs
+- Store JSON blobs as TEXT columns; parse in application code
+- Use `created_at TEXT DEFAULT (datetime('now'))` for automatic timestamps
+- Design tables around query patterns; denormalize where it simplifies reads

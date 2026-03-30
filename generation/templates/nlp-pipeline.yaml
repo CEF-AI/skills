@@ -113,30 +113,16 @@ agents:
           type: object
 
 cubbies:
-  - name: "nlpResults"
+  - alias: "nlpResults"
+    name: "NLP Results"
     description: "Processed text results and embeddings"
-    dataTypes:
-      - json
-      - search
-    queries:
-      - name: "getResults"
-        file: ./queries/get-results.ts
-        parameters:
-          properties:
-            entityId:
-              type: string
-            mode:
-              type: string
-          required:
-            - entityId
-          type: object
-        returns:
-          properties:
-            success:
-              type: boolean
-            data:
-              type: object
-          type: object
+    migrations:
+      - version: 1
+        up: "CREATE TABLE results (id INTEGER PRIMARY KEY, entity_id TEXT, text TEXT, sentiment REAL, emotion TEXT, created_at TEXT DEFAULT (datetime('now')))"
+      - version: 2
+        up: "CREATE VIRTUAL TABLE IF NOT EXISTS vec_embeddings USING vec0(embedding float[1536], +id TEXT, +entity_id TEXT)"
+      - version: 3
+        up: "CREATE INDEX idx_results_entity ON results(entity_id)"
 
 workspaces:
   - name: "NLP Processing"

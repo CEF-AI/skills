@@ -38,29 +38,14 @@ agents:
           type: object
 
 cubbies:
-  - name: "detections"
+  - alias: "detections"
+    name: "Detections"
     description: "Stores detection results"
-    dataTypes:
-      - json
-    queries:
-      - name: "getDetections"
-        file: ./queries/get-detections.ts
-        parameters:
-          properties:
-            entityId:
-              type: string
-            mode:
-              type: string
-          required:
-            - entityId
-          type: object
-        returns:
-          properties:
-            success:
-              type: boolean
-            data:
-              type: object
-          type: object
+    migrations:
+      - version: 1
+        up: "CREATE TABLE detections (id INTEGER PRIMARY KEY, entity_id TEXT, data TEXT, created_at TEXT DEFAULT (datetime('now')))"
+      - version: 2
+        up: "CREATE INDEX idx_detections_entity ON detections(entity_id)"
 
 workspaces:
   - name: "Detection Site"

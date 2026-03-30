@@ -20,8 +20,8 @@ AgentService (identified by agentServicePubKey)
 ├── Agent (named service with one or more tasks)
 │   └── Task (individual handler function with typed params/returns)
 │
-└── Cubby (named key-value state store)
-    └── Query (read handler exposing cubby data to external callers)
+└── Cubby (SQLite database with migration schema)
+    └── Instance (lazily created per instanceId)
 ```
 
 ---
@@ -106,7 +106,7 @@ The main event handler — typically an orchestrator or "concierge" that receive
 | `file` | `string` | Relative path to the `.ts` handler file |
 | `version` | `string` | Semantic version (e.g., "1.0.0") |
 
-The engagement handler has full access to the CEF runtime: `context.cubby()`, `context.agents.*`, `context.streams.subscribe()`, `context.fetch()`, and `context.log()`.
+The engagement handler has full access to the CEF runtime: `context.cubbies.<alias>`, `context.agents.*`, `context.streams.subscribe()`, `context.fetch()`, and `context.log()`.
 
 Multiple engagements can exist in one agent service, each with their own agent graph. An engagement can also be standalone (no agents) for simple event processing.
 
@@ -137,26 +137,20 @@ A single handler function within an agent. Each task is a TypeScript file with t
 
 ### Cubby
 
-A named key-value state store with JSON, vector, and primitive sub-stores. Used for long-term memory and agent-to-agent state sharing.
+A SQLite database with a migration-based schema. Used for persistent queryable storage and agent-to-agent state sharing. Each cubby can have multiple independent instances.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `name` | `string` | Store name (e.g., "syncMission") |
+| `alias` | `string` | camelCase JS identifier used in code (e.g., `missionReport`) |
+| `name` | `string` | Human-readable display name |
 | `description` | `string` | Optional description |
-| `cubbyId` | `string` | UUID assigned after creation |
-| `dataTypes` | `string[]` | Enabled data types (e.g., `["json", "search"]`) |
-| `queries` | `CubbyQuery[]` | Read handlers for external access |
+| `migrations` | `Migration[]` | Ordered SQL scripts defining the schema |
+| `maxSizeBytes` | `number` | Optional size limit per instance |
+| `idleTimeout` | `string` | Optional idle timeout (e.g., `"24h"`) |
 
-### CubbyQuery
+### Cubby Instance
 
-A read handler that exposes cubby data to external callers (e.g., client apps via the SDK).
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `name` | `string` | Query name |
-| `file` | `string` | Relative path to the `.ts` handler file |
-| `parameters` | `JSON Schema` | Input schema |
-| `returns` | `JSON Schema` | Output schema |
+A physical SQLite database file, identified by a user-chosen `instanceId` string (e.g., `mission_42`, `user_123`, `default`). Instances are created lazily on first access. Each instance has the full schema applied via migrations.
 
 ---
 
@@ -188,7 +182,7 @@ async function handle(event: { payload: Record<string, unknown> }, context: CEFC
 
 | Store | API | Use For | Scope |
 |-------|-----|---------|-------|
-| **Cubby** | `context.cubby(name)` | Long-term persistent data, agent-to-agent sharing, query-accessible state | Named store, cross-invocation |
+| **Cubby** | `context.cubbies.<alias>.query/exec()` | Persistent queryable storage, agent-to-agent sharing | SQLite instance, cross-invocation |
 
 ### Inference via context.fetch()
 
@@ -207,11 +201,10 @@ A concrete example — "detect illegally parked cars from drone footage":
 5. **Agents**:
    - "Object Detection" with task "Yolo" (runs YOLO model on images)
    - "Parking Violation Detector" with task "Detect" (classifies violations from detections + telemetry)
-6. **Cubby**: "syncMission" (stores synced drone packets, violation records)
-7. **CubbyQuery**: "syncMission" (exposes mission data to the client UI)
-8. **Deployment**: "Illegal Parking Detection" (binds stream → engagement, trigger: all events)
+6. **Cubby**: alias `syncMission` with migration creating activity/violation tables (stores detection results)
+7. **Deployment**: "Illegal Parking Detection" (binds stream -> engagement, trigger: all events)
 
-The engagement subscribes to the stream, receives drone events, calls the object detection agent, passes results to the violation detector, stores everything in cubby, and the client UI queries the cubby for results.
+The engagement subscribes to the stream, receives drone events, calls the object detection agent, passes results to the violation detector, and stores everything in the cubby via SQL INSERT/UPDATE.
 
 ---
 
@@ -221,7 +214,7 @@ The engagement subscribes to the stream, receives drone events, calls the object
 |--------|--------|---------|---------|
 | Agent | Human-readable, title case | camelCase | name: "Object Detection", alias: `objectDetection` |
 | Task | Human-readable | camelCase | name: "Yolo", alias: `yolo` |
-| Cubby | kebab-case or camelCase | Same as name | name: "syncMission" |
+| Cubby | Human-readable | camelCase | name: "Sync Mission", alias: `syncMission` |
 | Engagement | Human-readable | N/A | name: "Illegal Parking Detection" |
 
 The `alias` is what appears in code: `context.agents.objectDetection.yolo(payload)`.

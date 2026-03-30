@@ -2,7 +2,7 @@
 
 The concierge is the central coordinator in a CEF topology. It receives events (directly or via stream subscription), dispatches work to specialized agents, aggregates results, and persists state. Most non-trivial deployments have one.
 
-**Extracted from:** `Gaming Demo Agents/conciergeAgent.ts`, `Nightingale Agents/engagement.ts`, `Project-Tazz/concierge.ts`
+**Derived from:** Production agent deployments (multi-agent orchestration, stream processing, linear pipelines)
 
 ---
 
@@ -21,11 +21,11 @@ The concierge is the central coordinator in a CEF topology. It receives events (
 Event arrives
   → Engagement handler (concierge)
     → Validate input
-    → Dedup check (Cubby)
-    → Dispatch to Agent A
-    → Dispatch to Agent B (possibly in parallel)
-    → Aggregate results
-    → Persist to Cubby
+    -> Dedup check (cubby SQL)
+    -> Dispatch to Agent A
+    -> Dispatch to Agent B (possibly in parallel)
+    -> Aggregate results
+    -> Persist to cubby (SQL INSERT)
     → Return result
 ```
 
@@ -34,10 +34,6 @@ Event arrives
 ## Inline Template
 
 ```typescript
-const CUBBY_NAME = 'my-domain';
-
-const uuid = (): string => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-
 function bytesToString(bytes: Uint8Array): string {
     let str = '';
     for (let i = 0; i < bytes.length; i++) {
@@ -47,9 +43,7 @@ function bytesToString(bytes: Uint8Array): string {
 }
 
 async function handle(event: any, context: any) {
-    const cubby = context.cubby(CUBBY_NAME);
     const { entityId, streamId } = event.payload;
-    const cid = uuid();
 
     // --- Validate ---
     if (!entityId) {
@@ -58,15 +52,15 @@ async function handle(event: any, context: any) {
     }
 
     // --- Dedup (optional) ---
-    const dedupKey = `processed/${cid}`;
-    const existing = await cubby.json.get(dedupKey).catch(() => null);
-    if (existing) {
-        context.log(`Duplicate event ${cid} — skipping`);
+    const check = await context.cubbies.myDomain.query(
+        entityId, 'SELECT 1 FROM processed WHERE entity_id = ?', [entityId]
+    );
+    if (check.rows.length > 0) {
+        context.log(`Duplicate event ${entityId} -- skipping`);
         return { skipped: true, reason: 'duplicate' };
     }
 
     // --- Option A: Direct event processing ---
-    // Dispatch to agents
     const detectionResult = await context.agents.objectDetection.yolo({
         image: event.payload.image
     });
@@ -77,7 +71,11 @@ async function handle(event: any, context: any) {
     });
 
     // Persist
-    await cubby.json.set(`entity/${entityId}/result`, analysisResult);
+    await context.cubbies.myDomain.exec(
+        entityId,
+        'INSERT INTO results (entity_id, data, created_at) VALUES (?, ?, ?)',
+        [entityId, JSON.stringify(analysisResult), new Date().toISOString()]
+    );
 
     // --- Option B: Stream subscription (long-running) ---
     const stream = await context.streams.subscribe(streamId);
@@ -87,17 +85,29 @@ async function handle(event: any, context: any) {
 
         if (eventType === 'TYPE_A') {
             const result = await context.agents.agentA.process(data);
-            await cubby.json.set(`entity/${entityId}/${data.timestamp}`, result);
+            await context.cubbies.myDomain.exec(
+                entityId,
+                'INSERT INTO events (entity_id, data, ts) VALUES (?, ?, ?)',
+                [entityId, JSON.stringify(result), data.timestamp]
+            );
         } else if (eventType === 'TYPE_B') {
             const result = await context.agents.agentB.analyze(data);
-            await cubby.json.set(`entity/${entityId}/analysis/${data.timestamp}`, result);
+            await context.cubbies.myDomain.exec(
+                entityId,
+                'INSERT INTO analysis (entity_id, data, ts) VALUES (?, ?, ?)',
+                [entityId, JSON.stringify(result), data.timestamp]
+            );
         } else if (eventType === 'COMPLETE') {
             break;
         }
     }
 
     // Mark as processed
-    await cubby.json.set(dedupKey, { processedAt: Date.now() });
+    await context.cubbies.myDomain.exec(
+        entityId,
+        'INSERT OR IGNORE INTO processed (entity_id, processed_at) VALUES (?, ?)',
+        [entityId, new Date().toISOString()]
+    );
 
     return { ok: true, entityId };
 }
@@ -105,34 +115,33 @@ async function handle(event: any, context: any) {
 
 ---
 
-## Production Examples
+## Common Variants
 
-### Nightingale — Multi-stream drone synchronization
+### Multi-stream synchronization
 
-The engagement subscribes to a single stream carrying multiple event types (telemetry, RGB frames, thermal, KLV). It dispatches each to appropriate storage, calls YOLO for object detection on RGB frames, and calls the violation detector on detected objects. Results are synced into composite packets stored in cubby.
+The engagement subscribes to a stream carrying multiple event types (e.g. telemetry, video frames, sensor data). It dispatches each to appropriate SQL tables, calls detection/analysis agents, and assembles composite results.
 
 Key patterns:
 - Stream subscription with `for await` loop
-- Event type dispatch (`DRONE_TELEMETRY_DATA`, `VIDEO_STREAM_DATA`, etc.)
-- Agent calls: `context.agents.objectDetection.yolo()`, `context.agents.parkingViolationDetector.detect()`
-- Composite state assembly in cubby (`mission/{id}/synced/{timestamp}`)
+- Event type dispatch based on `data.event_type`
+- Agent calls: `context.agents.objectDetection.detect()`, etc.
+- SQL INSERT per event type into separate tables
+- Windowed synchronization via SQL queries
 
-### Gaming Demo — Parallel stream processing
+### Parallel stream processing
 
-The concierge receives audio and game data stream IDs, processes both in parallel via `Promise.all`, then runs post-match analysis. Audio stream goes through STT → sentiment → embedding → topic matching. Game stream stores moments and accumulates key events. After both complete, clustering and pattern analysis run.
+The concierge receives multiple stream IDs, processes them in parallel via `Promise.all`, then runs post-processing. Each stream has its own pipeline.
 
 Key patterns:
-- `Promise.all([processAudioStream(...), processGameDataStream(...)])`
-- Sequential pipeline within each stream (STT → sentiment → embedding → topic)
-- Unassigned item accumulation for batch clustering at match end
-- CID-scoped state for test isolation
+- `Promise.all([processStreamA(...), processStreamB(...)])`
+- Sequential pipeline within each stream
+- Instance-scoped cubby isolation per entity
 
-### Project Tazz — Linear orchestration
+### Linear orchestration with dedup
 
-Validates PR event → calls prAnalysisAgent for LLM analysis → maps result to generic ActivityRecord → calls notionAgent to write entry. Simple linear flow with dedup via cubby primitive (`cubby.set(dedupKey, ...)`).
+Validates input, calls analysis agent, maps result, writes to external service. Dedup via SQL (SELECT before processing, INSERT OR IGNORE after).
 
 Key patterns:
 - Input validation with early return
-- Cubby-based deduplication
-- Linear agent pipeline: analyze → map → write
-- Source-agnostic mapping layer (GitHub PR → generic ActivityRecord)
+- SQL-based deduplication
+- Linear agent pipeline: analyze -> map -> write

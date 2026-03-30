@@ -83,34 +83,16 @@ agents:
           type: object
 
 cubbies:
-  - name: "analytics"
+  - alias: "analytics"
+    name: "Analytics"
     description: "Real-time analytics state and aggregated results"
-    dataTypes:
-      - json
-      - search
-    queries:
-      - name: "getAnalytics"
-        file: ./queries/get-analytics.ts
-        parameters:
-          properties:
-            entityId:
-              type: string
-            mode:
-              type: string
-            startTime:
-              type: number
-            endTime:
-              type: number
-          required:
-            - entityId
-          type: object
-        returns:
-          properties:
-            success:
-              type: boolean
-            data:
-              type: object
-          type: object
+    migrations:
+      - version: 1
+        up: "CREATE TABLE events (id INTEGER PRIMARY KEY, entity_id TEXT, category TEXT, confidence REAL, data TEXT, ts INTEGER)"
+      - version: 2
+        up: "CREATE TABLE aggregations (entity_id TEXT, window_start INTEGER, window_end INTEGER, summary TEXT, count INTEGER, PRIMARY KEY (entity_id, window_start))"
+      - version: 3
+        up: "CREATE INDEX idx_events_entity_ts ON events(entity_id, ts)"
 
 workspaces:
   - name: "Analytics"

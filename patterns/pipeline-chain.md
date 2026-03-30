@@ -2,7 +2,7 @@
 
 A pipeline chain processes data through a sequence of agents, where each step's output feeds into the next step's input. This creates a linear processing flow: A → B → C → result.
 
-**Extracted from:** Gaming Demo audio pipeline (STT → sentiment → embedding → topic matching → topic update)
+**Derived from:** Production audio NLP pipeline (STT -> sentiment -> embedding -> topic matching)
 
 ---
 
@@ -30,36 +30,33 @@ Input arrives
 ## Inline Template
 
 ```typescript
-const CUBBY_NAME = 'my-domain';
-
 async function handle(event: any, context: any) {
     const { entityId, rawInput } = event.payload;
-    const cubby = context.cubby(CUBBY_NAME);
 
-    // Stage 1: Transcription (raw audio → text)
+    // Stage 1: Transcription (raw audio -> text)
     const transcription = await context.agents.speechToText.transcribe({
         audio: rawInput.audio,
         audioFormat: 'wav'
     });
 
     if (!transcription.fullText || transcription.fullText.trim() === '') {
-        context.log('Empty transcription — skipping pipeline');
+        context.log('Empty transcription -- skipping pipeline');
         return { skipped: true };
     }
 
-    // Stage 2: Sentiment analysis (text → sentiment + emotion)
+    // Stage 2: Sentiment analysis (text -> sentiment + emotion)
     const sentiment = await context.agents.sentimentAgent.analyze({
         text: transcription.fullText
     });
 
-    // Stage 3: Embedding generation (text → vector)
+    // Stage 3: Embedding generation (text -> vector)
     const embeddingResult = await context.agents.embeddingAgent.embed({
         texts: [transcription.fullText]
     });
     const embedding = embeddingResult.embeddings[0];
 
     if (!embedding || embedding.length === 0) {
-        context.log('Empty embedding — skipping topic matching');
+        context.log('Empty embedding -- skipping topic matching');
         return {
             transcription: transcription.fullText,
             sentiment: sentiment.sentiment,
@@ -67,7 +64,7 @@ async function handle(event: any, context: any) {
         };
     }
 
-    // Stage 4: Topic matching (vector → topic assignment)
+    // Stage 4: Topic matching (vector -> topic assignment)
     const matchResult = await context.agents.topicAgent.matchTopic({
         embedding,
         entityId,
@@ -85,16 +82,14 @@ async function handle(event: any, context: any) {
     }
 
     // Persist the enriched record
-    const key = `entity/${entityId}/processed/${Date.now()}`;
-    await cubby.json.set(key, {
-        text: transcription.fullText,
-        sentiment: sentiment.sentiment,
-        emotion: sentiment.emotion,
-        embedding: embedding.slice(0, 10), // store truncated for reference
-        topicId: matchResult.topicId || null,
-        similarity: matchResult.similarity || null,
-        processedAt: new Date().toISOString()
-    });
+    const now = new Date().toISOString();
+    await context.cubbies.myDomain.exec(
+        entityId,
+        `INSERT INTO processed (entity_id, text, sentiment, emotion, topic_id, similarity, processed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [entityId, transcription.fullText, sentiment.sentiment, sentiment.emotion,
+         matchResult.topicId || null, matchResult.similarity || null, now]
+    );
 
     return {
         text: transcription.fullText,
@@ -173,31 +168,23 @@ if (unassigned.length >= 3) {
 
 ---
 
-## Production Example: Gaming Audio Pipeline
+## Example: Audio NLP Pipeline
 
-The gaming demo processes player audio through a 5-stage pipeline:
+A typical audio processing pipeline:
 
 ```
 Audio chunk (base64)
-  → speechToTextAgent.transcribe() → { fullText, segments, processingTime }
-  → sentimentAgent.analyze() → { sentiment, emotion, confidence }
-  → embeddingAgent.embed() → { embeddings: number[][] }
-  → topicAgent.matchTopic() → { topicId, similarity }
-  → topicAgent.updateTopic() or accumulate for clustering
+  -> speechToText.transcribe() -> { fullText, segments }
+  -> sentimentAgent.analyze() -> { sentiment, emotion }
+  -> embeddingAgent.embed() -> { embeddings: number[][] }
+  -> topicAgent.matchTopic() -> { topicId, similarity }
+  -> topicAgent.updateTopic() or accumulate for clustering
 ```
 
-After the match ends, unassigned items are clustered:
+After all chunks are processed, unassigned items can be batch-clustered:
 
 ```
 Unassigned embeddings
-  → clusteringAgent.cluster() → { labels, clusterCount }
-  → topicAgent.createTopic() for each cluster
-  → Backfill topicId on utterances
-```
-
-Then pattern analysis runs on accumulated key events:
-
-```
-Key game events + sentiment context + topic context
-  → patternAgent.analyzeBatch() → { classification, pattern, confidence }
+  -> clusteringAgent.cluster() -> { labels, clusterCount }
+  -> topicAgent.createTopic() for each cluster
 ```

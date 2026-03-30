@@ -79,18 +79,17 @@ export interface TaskConfig {
 }
 
 export interface CubbyConfig {
+    alias: string;          // camelCase -- used in ctx.cubbies.<alias>
     name: string;
     description?: string;
-    cubbyId?: string;
-    dataTypes?: string[];   // e.g., ['json', 'search']
-    queries?: CubbyQueryConfig[];
+    migrations: CubbyMigration[];
+    maxSizeBytes?: number;
+    idleTimeout?: string;   // e.g., '24h'
 }
 
-export interface CubbyQueryConfig {
-    name: string;
-    file: string;           // relative path to .ts handler
-    parameters?: Record<string, unknown>;  // JSON Schema
-    returns?: Record<string, unknown>;     // JSON Schema
+export interface CubbyMigration {
+    version: number;
+    up: string;             // SQL DDL statement
 }
 
 // ─── Environment ───────────────────────────────────────────────────────────
@@ -99,5 +98,5 @@ export interface EnvConfig {
     authToken: string;       // CEF_AUTH_TOKEN
     orchestratorUrl: string; // CEF_ORCHESTRATOR_URL
     robApiUrl: string;       // CEF_ROB_API_URL
-    ddcUrl?: string;         // CEF_DDC_URL (required for cubbies)
+    ddcUrl?: string;         // CEF_DDC_URL
 }

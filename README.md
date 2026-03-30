@@ -59,10 +59,7 @@ intelligence/
 │   ├── cef-types.ts                      ← CEFEvent, CEFContext, handler signature
 │   └── hierarchy-types.ts               ← CefConfig, AgentConfig, TaskConfig (from CLI)
 │
-├── examples/                              ← Complete, deployable reference projects
-│   ├── nightingale-drone-surveillance/   ← Multi-stream drone + YOLO + violation detection
-│   ├── gaming-demo-analytics/            ← Audio pipeline + topic trees + pattern analysis
-│   └── github-notion-sync/              ← SaaS bridge: GitHub PR → LLM → Notion
+├── examples/                              ← Complete, deployable reference projects (to be re-added)
 │
 └── generation/                            ← NLP generation guidance
     ├── system-prompt.md                  ← Instructions for LLM-driven topology generation
@@ -79,7 +76,7 @@ intelligence/
 
 | Store | API | Use For |
 |-------|-----|---------|
-| **Cubby** | `context.cubby(name)` | Long-term state, agent-to-agent sharing, query-accessible data |
+| **Cubby** | `ctx.cubbies.<alias>.query/exec()` | Persistent queryable storage (SQLite), agent-to-agent sharing |
 
 ---
 

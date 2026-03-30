@@ -29,7 +29,7 @@ export interface CEFEvent {
 
 export interface CEFContext {
     log(...args: unknown[]): void;
-    cubby(name: string): CEFCubbyInstance;
+    cubbies: CEFCubbiesClient;
     agents: CEFAgentClient;
     streams: CEFStreamsClient;
     fetch(url: string, options?: CEFFetchOptions): Promise<CEFFetchResponse>;
@@ -60,35 +60,46 @@ export interface CEFFetchResponse {
     headers?: Record<string, string>;
 }
 
-// ─── Cubby ─────────────────────────────────────────────────────────────────
+// ─── Cubbies (SQLite) ──────────────────────────────────────────────────────
 
-export interface CEFCubbyInstance {
-    json: CEFCubbyJsonStore;
-    vector: CEFCubbyVectorStore;
-    get(key: string): Promise<string | null>;
-    incr(key: string): Promise<number>;
-    del(key: string): Promise<void>;
-    expire(key: string, seconds: number): Promise<void>;
+/**
+ * Result from a query() call (SELECT).
+ */
+export interface CEFQueryResult {
+    columns: string[];
+    rows: unknown[][];
+    meta: { duration: number; rowsRead: number };
 }
 
-export interface CEFCubbyJsonStore {
-    get(key: string): Promise<unknown>;
-    set(key: string, value: unknown): Promise<void>;
-    exists(key: string): Promise<boolean>;
-    delete(key: string): Promise<void>;
-    keys(pattern: string): Promise<string[]>;
-    mget?(keys: string[]): Promise<Record<string, unknown>>;
-    mset?(entries: Record<string, unknown>): Promise<void>;
+/**
+ * Result from an exec() call (INSERT/UPDATE/DELETE).
+ */
+export interface CEFExecResult {
+    rowsAffected: number;
+    lastInsertId: number;
+    meta: { duration: number; rowsRead: number };
 }
 
-export interface CEFCubbyVectorStore {
-    add(id: string, embedding: number[], metadata?: Record<string, unknown>): Promise<void>;
-    get(id: string): Promise<{ vector: number[]; metadata?: Record<string, unknown> } | null>;
-    search(
-        vector: number[],
-        options?: { limit?: number; filter?: Record<string, unknown> },
-    ): Promise<Array<{ id: string; score: number; metadata?: Record<string, unknown> }>>;
-    createIndex(config: { dimension: number }): Promise<void>;
+/**
+ * Handle to a single cubby (SQLite database), accessed via ctx.cubbies.{alias}.
+ *
+ * Overloaded signatures: if the first string argument contains a space,
+ * it is treated as SQL and instanceId defaults to "default".
+ * Otherwise the first argument is the instanceId.
+ */
+export interface CEFCubbyHandle {
+    query(sql: string, params?: unknown[]): Promise<CEFQueryResult>;
+    query(instanceId: string, sql: string, params?: unknown[]): Promise<CEFQueryResult>;
+    exec(sql: string, params?: unknown[]): Promise<CEFExecResult>;
+    exec(instanceId: string, sql: string, params?: unknown[]): Promise<CEFExecResult>;
+}
+
+/**
+ * Dynamic proxy keyed by cubby alias. Aliases are defined in the cubby
+ * definition and must be valid JS identifiers.
+ */
+export interface CEFCubbiesClient {
+    [alias: string]: CEFCubbyHandle;
 }
 
 // ─── Agent-to-Agent ────────────────────────────────────────────────────────

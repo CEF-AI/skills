@@ -63,10 +63,12 @@ agents:
           type: object
 
 cubbies:
-  - name: "syncState"
+  - alias: "syncState"
+    name: "Sync State"
     description: "Dedup store and sync state tracking"
-    dataTypes:
-      - json
+    migrations:
+      - version: 1
+        up: "CREATE TABLE processed (event_id TEXT PRIMARY KEY, processed_at TEXT, category TEXT)"
 
 workspaces:
   - name: "Data Sync"

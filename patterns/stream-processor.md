@@ -2,7 +2,7 @@
 
 A stream processor subscribes to a CEF stream and processes packets in a long-running `for await` loop. Each packet is parsed, dispatched based on event type, and results are stored or forwarded.
 
-**Extracted from:** `Nightingale Agents/engagement.ts`, `Gaming Demo Agents/conciergeAgent.ts`
+**Derived from:** Production agent deployments (multi-stream sync, continuous event processing)
 
 ---
 
@@ -41,7 +41,6 @@ function bytesToString(bytes: Uint8Array): string {
 }
 
 async function handle(event: any, context: any) {
-    const cubby = context.cubby('my-store');
     const streamId = event.payload.streamId;
 
     if (!streamId) {
@@ -63,12 +62,18 @@ async function handle(event: any, context: any) {
                 : data.timestamp || Date.now();
 
             if (eventType === 'DATA_TYPE_A') {
-                const key = `entity/${entityId}/typeA/${timestamp}`;
-                await cubby.json.set(key, { ...data, storedAt: Date.now() });
+                await context.cubbies.myStore.exec(
+                    entityId,
+                    'INSERT INTO type_a (entity_id, data, ts, stored_at) VALUES (?, ?, ?, ?)',
+                    [entityId, JSON.stringify(data), timestamp, Date.now()]
+                );
             } else if (eventType === 'DATA_TYPE_B') {
                 const result = await context.agents.processor.process(data);
-                const key = `entity/${entityId}/typeB/${timestamp}`;
-                await cubby.json.set(key, { ...result, storedAt: Date.now() });
+                await context.cubbies.myStore.exec(
+                    entityId,
+                    'INSERT INTO type_b (entity_id, data, ts) VALUES (?, ?, ?)',
+                    [entityId, JSON.stringify(result), timestamp]
+                );
             } else if (eventType === 'COMPLETE') {
                 context.log('Stream complete');
                 break;
@@ -100,45 +105,35 @@ function bytesToString(bytes: Uint8Array): string {
 const data = JSON.parse(bytesToString(packet.payload));
 ```
 
-### Timestamp indexing
+### Time-series queries
 
-For time-series data, maintain a timestamp index alongside the data:
+With SQL, timestamp indexing is built into the table schema. Create an index on the `ts` column for efficient range queries.
 
 ```typescript
-async function appendTimestamp(entityId: string, streamType: string, timestamp: number, cubby: any) {
-    const indexKey = `entity/${entityId}/${streamType}/_index`;
-    let timestamps: number[] = [];
-    try { timestamps = await cubby.json.get(indexKey); } catch (_) {}
-    if (!Array.isArray(timestamps)) timestamps = [];
-    timestamps.push(timestamp);
-    await cubby.json.set(indexKey, timestamps);
-}
+// Range query
+const events = await context.cubbies.myStore.query(
+    entityId,
+    'SELECT * FROM events WHERE stream_type = ? AND ts BETWEEN ? AND ? ORDER BY ts',
+    [streamType, startTime, endTime]
+);
 ```
 
 ### Windowed synchronization
 
-Match events from different streams within a time window:
+Match events from different streams within a time window using SQL:
 
 ```typescript
 const SYNC_WINDOW_MS = 3000;
 
-async function findInWindow(entityId: string, streamType: string, targetTs: number, cubby: any): Promise<any[]> {
-    const indexKey = `entity/${entityId}/${streamType}/_index`;
-    let timestamps: number[] = [];
-    try { timestamps = await cubby.json.get(indexKey); } catch (_) {}
-    if (!Array.isArray(timestamps)) return [];
-
-    const matching = timestamps.filter(ts => Math.abs(ts - targetTs) <= SYNC_WINDOW_MS);
-    const keys = matching.map(ts => `entity/${entityId}/${streamType}/${ts}`);
-
-    const results: any[] = [];
-    for (const key of keys) {
-        try {
-            const data = await cubby.json.get(key);
-            if (data) results.push(data);
-        } catch (_) {}
-    }
-    return results;
+async function findInWindow(entityId: string, streamType: string, targetTs: number, ctx: any): Promise<any[]> {
+    const result = await ctx.cubbies.myStore.query(
+        entityId,
+        `SELECT data FROM events
+         WHERE stream_type = ? AND ABS(ts - ?) <= ?
+         ORDER BY ts`,
+        [streamType, targetTs, SYNC_WINDOW_MS]
+    );
+    return result.rows.map((r: any[]) => JSON.parse(r[0]));
 }
 ```
 
@@ -155,15 +150,15 @@ if (data.type === 'COMPLETE' || data.type === 'STREAM_END') {
 
 ---
 
-## Production Example: Multi-Stream Drone Sync
+## Example: Multi-Stream Sensor Sync
 
-The Nightingale engagement subscribes to one stream carrying four event types. Each type is stored separately, then a synchronization pass matches data from different streams within a 3-second window:
+A stream processor subscribing to one stream with multiple event types. Each type is stored in its own SQL table, then a synchronization pass matches data within a time window:
 
 ```
-DRONE_TELEMETRY_DATA → store telemetry → attempt sync
-VIDEO_STREAM_DATA    → store RGB + run YOLO → attempt sync from frame
-THERMAL_STREAM_DATA  → store thermal → attempt sync from frame
-VIDEO_KLV_DATA       → store KLV metadata → attempt sync from frame
+TELEMETRY_DATA  -> INSERT into telemetry table -> attempt sync
+VIDEO_DATA      -> INSERT into video table + run detection agent -> attempt sync
+THERMAL_DATA    -> INSERT into thermal table -> attempt sync
+METADATA        -> INSERT into metadata table -> attempt sync
 ```
 
-The sync function finds the closest telemetry timestamp, gathers all frames within the window, assembles a composite "synced packet" with telemetry + RGB + thermal + KLV, and stores it in cubby. This pattern handles out-of-order arrival and partial data gracefully.
+The sync function queries each table for rows within a time window of the target timestamp, assembles a composite record, and inserts into a `synced` table. SQL makes this straightforward with WHERE clauses on indexed timestamp columns.

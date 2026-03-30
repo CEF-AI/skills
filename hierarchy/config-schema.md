@@ -14,12 +14,10 @@ my-project/
 ├── .env                                         ← auth token + endpoint URLs
 ├── engagements/
 │   └── {engagement-name}.ts                     ← one file per engagement (fully inline, no imports)
-├── agents/
-│   └── {agent-name-kebab}/
-│       └── tasks/
-│           └── {task-name}.ts                   ← one file per task (fully inline, no imports)
-└── queries/
-    └── {query-name}.ts                          ← one file per cubby query (fully inline, no imports)
+└── agents/
+    └── {agent-name-kebab}/
+        └── tasks/
+            └── {task-name}.ts                   ← one file per task (fully inline, no imports)
 ```
 
 ### Rules
@@ -142,32 +140,19 @@ agents:
 
 ```yaml
 cubbies:
-  - name: "syncMission"                     # Store name
-    description: "Synchronized drone mission data"  # Optional
-    cubbyId: "53d8630e-..."                 # UUID written back after creation
-    dataTypes:                               # Enabled data types
-      - json
-      - search
-    queries:
-      - name: "syncMission"                # Query name
-        file: ./queries/syncMission.ts      # RELATIVE path to query handler
-        parameters:                          # JSON Schema for input
-          properties:
-            missionId:
-              type: string
-            mode:
-              type: string
-          required:
-            - missionId
-          type: object
-        returns:                             # JSON Schema for output
-          properties:
-            success:
-              type: boolean
-            data:
-              type: object
-          type: object
+  - alias: "syncMission"                    # camelCase JS identifier; ctx.cubbies.syncMission
+    name: "Sync Mission"                    # Human-readable display name
+    description: "Per-mission structured data"  # Optional
+    migrations:                              # Ordered SQL scripts defining the schema
+      - version: 1
+        up: "CREATE TABLE activity (id INTEGER PRIMARY KEY, drone_id TEXT, action TEXT, ts TEXT)"
+      - version: 2
+        up: "ALTER TABLE activity ADD COLUMN processed INTEGER DEFAULT 0"
+    maxSizeBytes: 10737418240               # Optional; max size per instance (default 10 GB)
+    idleTimeout: "24h"                      # Optional; idle timeout
 ```
+
+**Alias rules**: Must be a valid JavaScript identifier (letters, digits, underscores; cannot start with a digit). Must be unique within the Agent Service.
 
 ---
 
@@ -183,8 +168,6 @@ Written-back fields:
 - `streamId` on streams
 - `deploymentId` on deployments
 - `agentServiceId` at root level
-
-Cubby queries are identified by name and do not get an ID — the CLI creates or updates based on name match.
 
 ---
 

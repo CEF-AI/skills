@@ -2,7 +2,7 @@
 
 Fan-out dispatches work to multiple agents in parallel using `Promise.all`, then aggregates the results. Use this when independent operations can run concurrently.
 
-**Extracted from:** `Gaming Demo Agents/conciergeAgent.ts` (parallel streams), `Gaming Demo Agents/sentimentAgent.ts` (parallel model calls), `Nightingale Agents/engagement.ts` (parallel frame queries)
+**Derived from:** Production agent deployments (parallel streams, parallel model calls, parallel queries)
 
 ---
 
@@ -10,7 +10,7 @@ Fan-out dispatches work to multiple agents in parallel using `Promise.all`, then
 
 - Multiple independent agent calls can run concurrently
 - Multiple model inference calls can run in parallel
-- Multiple cubby reads/writes are independent
+- Multiple cubby SQL queries are independent
 - You need to collect results from N agents into one response
 
 ---
@@ -105,35 +105,34 @@ async function handle(event: any, context: any) {
 ```typescript
 async function handle(event: any, context: any) {
     const { audioStreamId, gameDataStreamId, entityId } = event.payload;
-    const cubby = context.cubby('my-store');
     const results: any = { audio: null, game: null };
 
     // Process both streams in parallel
     await Promise.all([
-        processAudioStream(audioStreamId, entityId, cubby, context)
+        processAudioStream(audioStreamId, entityId, context)
             .then(r => { results.audio = r; })
             .catch(err => { context.log(`Audio stream error: ${err.message}`); }),
-        processGameStream(gameDataStreamId, entityId, cubby, context)
+        processGameStream(gameDataStreamId, entityId, context)
             .then(r => { results.game = r; })
             .catch(err => { context.log(`Game stream error: ${err.message}`); })
     ]);
 
-    // Both streams complete — run aggregation
-    await runPostProcessing(entityId, results, cubby, context);
+    // Both streams complete -- run aggregation
+    await runPostProcessing(entityId, results, context);
 
     return { ok: true };
 }
 
 // These functions would be defined inline in the same file
-async function processAudioStream(streamId: string, entityId: string, cubby: any, context: any) {
-    // ... stream processing logic ...
+async function processAudioStream(streamId: string, entityId: string, context: any) {
+    // ... stream processing logic using context.cubbies.myStore.exec/query() ...
 }
 
-async function processGameStream(streamId: string, entityId: string, cubby: any, context: any) {
-    // ... stream processing logic ...
+async function processGameStream(streamId: string, entityId: string, context: any) {
+    // ... stream processing logic using context.cubbies.myStore.exec/query() ...
 }
 
-async function runPostProcessing(entityId: string, results: any, cubby: any, context: any) {
+async function runPostProcessing(entityId: string, results: any, context: any) {
     // ... aggregation logic ...
 }
 ```
@@ -154,14 +153,23 @@ const [a, b, c] = await Promise.all([
 ]);
 ```
 
-### Parallel cubby reads
+### Parallel SQL queries
 
-Multiple independent cubby reads benefit from parallelization:
+Multiple independent cubby queries benefit from parallelization:
 
 ```typescript
 const [rgbFrames, thermalFrames, klvPackets] = await Promise.all([
-    findFramesInWindow(entityId, 'rgb', targetTimestamp, cubby),
-    findFramesInWindow(entityId, 'thermal', targetTimestamp, cubby),
-    findFramesInWindow(entityId, 'klv', targetTimestamp, cubby)
+    findInWindow(entityId, 'rgb', targetTimestamp, context),
+    findInWindow(entityId, 'thermal', targetTimestamp, context),
+    findInWindow(entityId, 'klv', targetTimestamp, context)
 ]);
+
+async function findInWindow(entityId: string, streamType: string, targetTs: number, ctx: any) {
+    const result = await ctx.cubbies.myStore.query(
+        entityId,
+        'SELECT data FROM events WHERE stream_type = ? AND ABS(ts - ?) <= 3000 ORDER BY ts',
+        [streamType, targetTs]
+    );
+    return result.rows.map((r: any[]) => JSON.parse(r[0]));
+}
 ```
