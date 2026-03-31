@@ -73,8 +73,7 @@ Output:
 1. `cef.config.yaml` with all entities and `file:` references
 2. Engagement handler(s) in `engagements/`
 3. Agent task handler(s) in `agents/{name-kebab}/tasks/`
-4. Cubby query handler(s) in `queries/`
-5. `.env.example` with required variables
+4. `.env.example` with required variables
 
 ## Handler Templates
 
@@ -142,32 +141,9 @@ async function handle(event: any, context: any) {
 
 ## Config Generation Rules
 
-### Naming Conventions
-
-| Entity | name | alias | directory |
-|-|-|-|-|
-| Agent | Title Case | camelCase | kebab-case |
-| Task | Title Case | camelCase | N/A |
-
-Example: "Parking Violation Detector" -> alias `parkingViolationDetector` -> directory `parking-violation-detector`
-
-### JSON Schema
-
-```yaml
-parameters:
-  properties:
-    image: { type: string }
-  required: [image]
-  type: object
-returns:
-  properties:
-    result: { type: object }
-  type: object
-```
-
-### Selector Conditions
-
-Format: `event_type:<your-event-type>`. Use `"*"` for catch-all.
+- **Naming:** Agent/Task `name` Title Case, `alias` camelCase, directory kebab-case. Example: "Parking Violation Detector" -> alias `parkingViolationDetector` -> directory `parking-violation-detector`
+- **JSON Schema:** Types lowercase (`string`, `number`, `boolean`, `array`, `object`). Use `properties`, `required`, `type: object`. See **cef-agent-basics** for full reference.
+- **Selectors:** Format `event_type:<your-event-type>`. Use `"*"` for catch-all.
 
 ## Starter Configs
 
