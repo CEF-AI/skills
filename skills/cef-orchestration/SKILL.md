@@ -378,6 +378,7 @@ if (unassigned.length >= 3) {
 
 ## Related Skills
 
-- **cef-agent-basics**: Handler signature, config schema
+- **cef-agent-basics**: Handler signature, runtime API, entity hierarchy
+- **cef-cli**: Config schema, deploy commands, environment setup
 - **cef-inference**: Model calls within pipelines
 - **cef-cubby-state**: Persisting results, state machine pattern

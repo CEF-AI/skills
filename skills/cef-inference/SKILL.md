@@ -348,6 +348,7 @@ async function handle(event: any, context: any) {
 
 ## Related Skills
 
-- **cef-agent-basics**: Handler signature, project structure, config schema
+- **cef-agent-basics**: Handler signature, runtime API, entity hierarchy
+- **cef-cli**: Config schema, deploy commands, environment setup
 - **cef-orchestration**: Wiring inference workers into pipelines and fan-out patterns
 - **cef-cubby-state**: Storing inference results persistently

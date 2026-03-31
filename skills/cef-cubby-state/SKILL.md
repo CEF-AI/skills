@@ -271,6 +271,7 @@ Alias rules: valid JS identifier, unique within the Agent Service. Never modify 
 
 ## Related Skills
 
-- **cef-agent-basics**: Handler signature, project structure
+- **cef-agent-basics**: Handler signature, runtime API, entity hierarchy
+- **cef-cli**: Config schema, deploy commands, environment setup
 - **cef-orchestration**: Multi-agent state sharing via cubby
 - **cef-inference**: Storing inference results

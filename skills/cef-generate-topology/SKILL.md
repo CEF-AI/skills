@@ -142,7 +142,7 @@ async function handle(event: any, context: any) {
 ## Config Generation Rules
 
 - **Naming:** Agent/Task `name` Title Case, `alias` camelCase, directory kebab-case. Example: "Parking Violation Detector" -> alias `parkingViolationDetector` -> directory `parking-violation-detector`
-- **JSON Schema:** Types lowercase (`string`, `number`, `boolean`, `array`, `object`). Use `properties`, `required`, `type: object`. See **cef-agent-basics** for full reference.
+- **JSON Schema:** Types lowercase (`string`, `number`, `boolean`, `array`, `object`). Use `properties`, `required`, `type: object`. See **cef-cli** for full reference.
 - **Selectors:** Format `event_type:<your-event-type>`. Use `"*"` for catch-all.
 
 ## Starter Configs
@@ -331,7 +331,8 @@ Before presenting generated output, verify:
 
 ## Related Skills
 
-- **cef-agent-basics**: Entity hierarchy, config schema, handler signature
+- **cef-agent-basics**: Handler signature, runtime API, entity hierarchy
+- **cef-cli**: Config schema, deploy commands, naming conventions, environment setup
 - **cef-inference**: Model catalog, request/response formats
 - **cef-cubby-state**: Storage API, state patterns
 - **cef-orchestration**: Multi-agent coordination patterns

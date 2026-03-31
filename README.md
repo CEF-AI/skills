@@ -1,88 +1,33 @@
-# CEF Intelligence
+# CEF AI Agent Skills
 
-Reference documentation for building agent services on the CEF stack. This knowledge base enables both human developers and LLMs to design, generate, and deploy complete CEF topologies from natural language goals.
+AI coding skills for building agent services on the [CEF AI](https://cef.ai) stack. Install into Claude Code, Cursor, Codex, or any AI coding tool that supports the Agent Skills standard.
 
----
+## Install
 
-## Quick Start
-
-**If you're building a new agent service:**
-
-1. Read `hierarchy/entity-model.md` — understand the entity hierarchy (workspace, stream, engagement, agent, task, cubby)
-2. Read `hierarchy/config-schema.md` — understand the `cef.config.yaml` format and directory layout
-3. Browse `patterns/` — pick the patterns that match your use case
-4. Browse `models/inference-catalog.md` — find models for your capabilities
-5. Look at `examples/` — see complete, deployable reference projects
-
-**If you're generating a topology from a natural language goal:**
-
-1. Read `generation/system-prompt.md` — the full instruction set for NLP-driven generation
-2. Follow the 5-step process: decompose → select patterns → select models → design entity graph → generate project
-3. Use `generation/templates/` as starters for common categories
-
----
-
-## Critical Runtime Constraint
-
-**All handler code must be fully inline.** The CEF Agent Runtime (V8 isolates) does not support `import` or `require`. Every `.ts` handler file must define all its types, constants, helpers, and logic inside the same file. The only external API is `context.*` injected at runtime.
-
----
-
-## Structure
-
-```
-intelligence/
-├── README.md                              ← You are here
-│
-├── hierarchy/                             ← Entity model and config schema
-│   ├── entity-model.md                   ← Workspace > Stream > Deployment > Engagement > Agent > Task > Cubby
-│   └── config-schema.md                  ← cef.config.yaml reference + directory layout convention
-│
-├── api-reference/                         ← CEF runtime APIs (available inside handlers)
-│   ├── cef-context.md                    ← CEFEvent, CEFContext, fetch, handler signature
-│   ├── cubby-api.md                      ← JSON store, vector store, primitives, TTL
-│   ├── streams-api.md                    ← Stream subscription, event types
-│   └── agent-to-agent.md                ← Dynamic proxy, fan-out, error handling
-│
-├── patterns/                              ← Composable architecture patterns
-│   ├── concierge-orchestrator.md         ← Multi-agent coordination
-│   ├── inference-worker.md               ← Single-model inference task
-│   ├── stream-processor.md               ← Long-running stream subscription
-│   ├── cubby-state-machine.md            ← Read-process-write state management
-│   ├── fan-out-aggregate.md              ← Parallel agent calls + aggregation
-│   └── pipeline-chain.md                ← Sequential A → B → C processing
-│
-├── models/                                ← Inference model catalog
-│   └── inference-catalog.md              ← Known models, request formats, bring-your-own
-│
-├── data-structures/                       ← Type definitions (REFERENCE ONLY — not importable)
-│   ├── cef-types.ts                      ← CEFEvent, CEFContext, handler signature
-│   └── hierarchy-types.ts               ← CefConfig, AgentConfig, TaskConfig (from CLI)
-│
-├── examples/                              ← Complete, deployable reference projects (to be re-added)
-│
-└── generation/                            ← NLP generation guidance
-    ├── system-prompt.md                  ← Instructions for LLM-driven topology generation
-    └── templates/                        ← YAML starter configs by use case
-        ├── object-detection.yaml
-        ├── nlp-pipeline.yaml
-        ├── data-sync.yaml
-        └── real-time-analytics.yaml
+```bash
+bunx skills add cef-ai/skills
 ```
 
----
+## Skills
 
-## Storage Model
+| Skill | Description |
+|-|-|
+| **cef-agent-basics** | Handler signature, runtime API (CEFEvent, CEFContext), entity hierarchy, V8 constraints, project directory conventions |
+| **cef-cli** | cef.config.yaml schema, deploy commands, environment variables, naming conventions, selector conditions |
+| **cef-inference** | ML model catalog (YOLO, Whisper, Qwen3, sentiment, LLM) and calling patterns |
+| **cef-cubby-state** | Cubby API (SQLite query/exec, migrations, sqlite-vec), state machine, dedup, SQL patterns |
+| **cef-orchestration** | Multi-agent coordination, streams, fan-out, pipeline chains |
+| **cef-generate-topology** | Generate a complete CEF project from a natural language goal |
 
-| Store | API | Use For |
-|-------|-----|---------|
-| **Cubby** | `ctx.cubbies.<alias>.query/exec()` | Persistent queryable storage (SQLite), agent-to-agent sharing |
+## How It Works
 
----
+Skills are automatically discovered by your AI coding assistant based on context. When you ask it to build a CEF agent, call a model, or manage cubby state, the relevant skill loads and provides CEF-specific guidance, code patterns, and production examples.
 
-## Sources
+## Critical Constraint
 
-- Handler/runtime: Production agents in `Agents/Gaming Demo Agents/`, `Agents/Nightingale Agents/`, `Agents/Project-Tazz-Execution-Log-Tracker/`
-- Deploy CLI: `CLI/cef-deploy/`
-- Config schema: `CLI/cef-deploy/src/types.ts`
-# Agent-Service-Intelligence
+All CEF handler code must be fully inline (no `import` or `require`). The runtime uses V8 isolates. Every skill enforces this rule.
+
+## Links
+
+- [CEF AI Platform](https://cef.ai)
+- [ROB Control Plane](https://rob.stage.cere.io/)
