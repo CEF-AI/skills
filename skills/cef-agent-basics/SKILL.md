@@ -1,6 +1,6 @@
 ---
 name: cef-agent-basics
-description: Use when writing CEF agent handler files, understanding the runtime API (CEFEvent, CEFContext), or learning the CEF entity hierarchy (workspace, stream, engagement, agent, task, cubby). Covers handler signature, V8 isolate constraints, event/context shapes, and project directory conventions.
+description: Use when writing CEF agent handler files, understanding the runtime API (CEFContext, Client SDK), or learning the CEF entity hierarchy (workspace, stream, engagement, agent, task, cubby). Covers handler signature, V8 isolate constraints, context shape, client SDK setup, and project directory conventions.
 ---
 
 # CEF Agent Basics
@@ -44,19 +44,6 @@ async function handle(event: any, context: any) {
 - `event.payload` contains the input data
 - `context` provides: `cubbies.<alias>.query/exec()`, `agents.<alias>.<task>(payload)`, `streams.subscribe(id)`, `fetch(url, opts)`, `log(msg)`
 
-## CEFEvent Shape
-
-```typescript
-interface CEFEvent {
-    payload: Record<string, unknown>;
-    id?: string;
-    event_type?: string;
-    app_id?: string;
-    timestamp?: string; // ISO 8601
-    context_path?: { agent_service: string; workspace: string; stream?: string };
-}
-```
-
 ## CEFContext Shape
 
 ```typescript
@@ -89,6 +76,32 @@ Rules:
 - `alias` fields use **camelCase** (e.g., `objectDetection`); this is what `context.agents.<alias>.<task>()` uses
 - `name` fields are human-readable title case
 - Every `.ts` file is fully self-contained; no imports
+
+## Client SDK (Sending Events)
+
+External code (demos, tests, scripts) sends events into CEF streams using `@cef-ai/client-sdk`. This runs outside the V8 isolate; standard imports are allowed.
+
+```typescript
+import { ClientContext, ClientSdk } from "@cef-ai/client-sdk";
+
+const CLUSTER_URL = 'https://compute-1.devnet.ddc-dragon.com';
+
+const context = new ClientContext({
+    agentService: 'pub_key',
+    workspace: 'workspace_id',
+    stream: 'stream_id',
+});
+
+const client = new ClientSdk({
+    url: CLUSTER_URL,
+    context,
+    wallet: "hybrid label reunion only dawn maze asset draft cousin height flock nation",
+});
+```
+
+- `ClientContext` maps directly to the entity hierarchy: `agentService` (pub key), `workspace`, `stream`
+- `ClientSdk` connects to a DDC Compute cluster with a wallet (mnemonic or signer)
+- The `context` determines the event path: which agent service, workspace, and stream receive the event
 
 ## Related Skills
 
