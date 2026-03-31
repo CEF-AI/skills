@@ -21,10 +21,7 @@ There is no application code, no build step, no tests. The repo contains only Ma
     ├── README.md              # Same as root README (for skill registry)
     ├── clientsdk/             # @cef-ai/client-sdk: events, queries, streams from external code
     ├── cli/                   # Config & deploy: cef.config.yaml schema, CLI commands, env vars
-    ├── coding/
-    │   ├── handlers/          # Runtime API: handler signature, CEFContext, V8 constraints
-    │   ├── orchestration/     # Coordination: concierge, stream processor, fan-out, pipeline chain
-    │   └── generation/        # Generation: 5-step process to produce a full project from a goal
+    ├── coding/                # Runtime API, handler signature, CEFContext, V8 constraints, orchestration patterns, topology generation
     ├── inference/             # ML models: Qwen2-VL, Qwen3, Whisper, emotion, sentiment, YOLO, plate; calling patterns
     └── storage/               # Storage: SQLite query/exec, migrations, sqlite-vec, state patterns
 ```
@@ -39,9 +36,7 @@ Each skill owns its domain content exactly once. Other skills cross-reference ra
 |-|-|
 | @cef-ai/client-sdk setup, events, queries, streams, agreements | clientsdk |
 | cef.config.yaml schema, deploy commands, env vars, naming conventions | cli |
-| Handler signature, CEFEvent, CEFContext, entity hierarchy | coding/handlers |
-| Multi-agent patterns, streams API, fan-out, pipeline chain | coding/orchestration |
-| 5-step generation process, starter configs, handler templates | coding/generation |
+| Handler signature, CEFContext, entity hierarchy, orchestration patterns, topology generation | coding |
 | Model catalog, inference endpoints, request/response formats | inference |
 | Cubby API (query/exec), migrations, sqlite-vec, state patterns | storage |
 

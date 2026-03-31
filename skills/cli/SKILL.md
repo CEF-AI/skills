@@ -302,8 +302,6 @@ Rules:
 
 ## Related Skills
 
-- **coding/handlers**: Handler signature, runtime API, entity hierarchy
+- **coding**: Handler signature, runtime API, entity hierarchy, orchestration patterns, topology generation
 - **inference**: ML model catalog and calling patterns
 - **storage**: Storage API and state management
-- **coding/orchestration**: Multi-agent coordination patterns
-- **coding/generation**: Generate a full project from a natural language goal

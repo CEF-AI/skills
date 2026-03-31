@@ -7,7 +7,7 @@ description: Use when calling ML models from a CEF agent handler via context.fet
 
 All model inference in CEF goes through `context.fetch()` to the inference endpoint. Never use `context.models`; it does not exist in production.
 
-> **Reminder:** All handler code must be fully inline. No `import` or `require`. See the **coding/handlers** skill.
+> **Reminder:** All handler code must be fully inline. No `import` or `require`. See the **coding** skill.
 
 ## Inference Endpoint
 
@@ -490,7 +490,6 @@ async function handle(event: any, ctx: any) {
 
 ## Related Skills
 
-- **coding/handlers**: Handler signature, runtime API, entity hierarchy
+- **coding**: Handler signature, runtime API, orchestration patterns, topology generation
 - **cli**: Config schema, deploy commands, environment setup
-- **coding/orchestration**: Wiring inference workers into pipelines and fan-out patterns
 - **storage**: Storing inference results persistently

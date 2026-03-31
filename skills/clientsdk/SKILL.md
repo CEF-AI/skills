@@ -305,6 +305,6 @@ type SignedWallet = JsonSigner | UriSigner | CereWalletSigner;
 
 ## Related Skills
 
-- **coding/handlers**: Handler signature, CEFContext (the runtime side that receives these events)
+- **coding**: Handler signature, CEFContext, orchestration patterns, topology generation
 - **cli**: Config schema, deploy commands
 - **storage**: Cubby schema and migration config (queried from client SDK)
