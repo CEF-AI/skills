@@ -1,9 +1,9 @@
 ---
-name: cef-agent-basics
-description: Use when writing CEF agent handler files, understanding the runtime API (CEFContext, Client SDK), or learning the CEF entity hierarchy (workspace, stream, engagement, agent, task, cubby). Covers handler signature, V8 isolate constraints, context shape, client SDK setup, and project directory conventions.
+name: cef-handlers
+description: Use when writing CEF agent handler files, understanding the runtime API (CEFContext), or learning the CEF entity hierarchy (workspace, stream, engagement, agent, task, cubby). Covers handler signature, V8 isolate constraints, context shape, and project directory conventions.
 ---
 
-# CEF Agent Basics
+# CEF Agent Handlers
 
 CEF AI is a distributed AI infrastructure platform. Agent services run on DDC Compute Nodes as V8 isolates. This skill covers the runtime API and handler writing.
 
@@ -77,36 +77,11 @@ Rules:
 - `name` fields are human-readable title case
 - Every `.ts` file is fully self-contained; no imports
 
-## Client SDK (Sending Events)
-
-External code (demos, tests, scripts) sends events into CEF streams using `@cef-ai/client-sdk`. This runs outside the V8 isolate; standard imports are allowed.
-
-```typescript
-import { ClientContext, ClientSdk } from "@cef-ai/client-sdk";
-
-const CLUSTER_URL = 'https://compute-1.devnet.ddc-dragon.com';
-
-const context = new ClientContext({
-    agentService: 'pub_key',
-    workspace: 'workspace_id',
-    stream: 'stream_id',
-});
-
-const client = new ClientSdk({
-    url: CLUSTER_URL,
-    context,
-    wallet: "hybrid label reunion only dawn maze asset draft cousin height flock nation",
-});
-```
-
-- `ClientContext` maps directly to the entity hierarchy: `agentService` (pub key), `workspace`, `stream`
-- `ClientSdk` connects to a DDC Compute cluster with a wallet (mnemonic or signer)
-- The `context` determines the event path: which agent service, workspace, and stream receive the event
-
 ## Related Skills
 
-- **cef-cli**: Config schema, deploy commands, environment setup, naming conventions
-- **cef-inference**: Calling ML models via context.fetch()
-- **cef-cubby-state**: Cubby API and state management patterns
-- **cef-orchestration**: Multi-agent coordination, streams, pipelines
-- **cef-generate-topology**: Generate a full project from a natural language goal
+- **cli**: Config schema, deploy commands, environment setup, naming conventions
+- **inference**: Calling ML models via context.fetch()
+- **storage**: Cubby API and state management patterns
+- **coding/orchestration**: Multi-agent coordination, streams, pipelines
+- **coding/generation**: Generate a full project from a natural language goal
+- **clientsdk**: Sending events from external code into CEF streams

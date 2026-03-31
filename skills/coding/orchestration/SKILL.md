@@ -7,7 +7,7 @@ description: Use when coordinating multiple CEF agents, processing event streams
 
 Patterns for wiring multiple agents together: coordinating, dispatching, streaming, and aggregating.
 
-> **Reminder:** All handler code must be fully inline. No `import` or `require`. See the **cef-agent-basics** skill.
+> **Reminder:** All handler code must be fully inline. No `import` or `require`. See the **coding/handlers** skill.
 
 ## Agent-to-Agent Calls
 
@@ -378,7 +378,7 @@ if (unassigned.length >= 3) {
 
 ## Related Skills
 
-- **cef-agent-basics**: Handler signature, runtime API, entity hierarchy
-- **cef-cli**: Config schema, deploy commands, environment setup
-- **cef-inference**: Model calls within pipelines
-- **cef-cubby-state**: Persisting results, state machine pattern
+- **coding/handlers**: Handler signature, runtime API, entity hierarchy
+- **cli**: Config schema, deploy commands, environment setup
+- **inference**: Model calls within pipelines
+- **storage**: Persisting results, state machine pattern

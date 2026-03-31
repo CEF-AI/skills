@@ -5,7 +5,7 @@ description: Use when generating a complete CEF agent service project from a nat
 
 # CEF Topology Generation
 
-Generate complete, deployable CEF projects from natural language goals. Follow the 5-step process below. Reference the **cef-agent-basics**, **cef-inference**, **cef-cubby-state**, and **cef-orchestration** skills for detailed API docs.
+Generate complete, deployable CEF projects from natural language goals. Follow the 5-step process below. Reference the **coding/handlers**, **inference**, **storage**, and **coding/orchestration** skills for detailed API docs.
 
 ## Hard Rules
 
@@ -47,17 +47,20 @@ Most deployments combine multiple patterns. Typical: concierge-orchestrator + pi
 
 ## Step 3: Select Models
 
-| Capability | Model | Endpoint |
-|-|-|-|
-| Object detection | YOLO11x (`bucket: 1338, name: 'yolo11x_1280'`) | DDC inference |
-| Speech-to-text | Whisper Large v3 (`bucket: '1317', path: 'fs/whisper-large-v3.zip'`) | HuggingFace |
-| Text embeddings | Qwen3-Embedding-4B (`bucket: '1320', cid: 'fs/Qwen3-Embedding-4B.zip'`) | HuggingFace |
-| Sentiment | multilingual-sentiment (`bucket: '1320', cid: 'fs/multilingual-sentiment-analysis.zip'`) | HuggingFace |
-| Emotion | distilroberta-emotion (`bucket: '1317', path: 'fs/emotion-english-distilroberta-base.zip'`) | HuggingFace |
-| LLM reasoning | Llama 3.2 11B (`bucket: '1317', path: 'fs/llama-3.2-11B-vision-instruct.zip'`) | HuggingFace |
-| Custom model | Upload to DDC bucket, reference by bucket + path/cid | Either |
+All models: bucket `1338`, endpoint `https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference`.
 
-See **cef-inference** skill for full request/response formats.
+| Capability | Model | Name / Version |
+|-|-|-|
+| Vision-language / chat | Qwen2-VL 7B | `qwen2-vl-7b-instruct` / `v1.0.0` |
+| Text embeddings | Qwen3 Embedding 4B | `qwen3-embedding-4b` / `v1.0.0` |
+| Speech-to-text | Whisper Large V3 | `whisper_large_v3` / `v1.0.4` |
+| Emotion classification | Emotion DistilRoBERTa | `emotion-english-distilroberta-base` / `v1.0.2` |
+| Sentiment polarity | Multilingual Sentiment | `multilingual-sentiment-analysis` / `v1.0.0` |
+| Object detection | YOLO11x 1280 | `yolo11x_1280` / `v1.0.0` |
+| License plate detection | YOLO Plate Detector | `yolo-plate-detector` / `v1.0.1` |
+| Plate text recognition | Fast Plate OCR | `fast-plate-ocr` / `v1.0.0` |
+
+See **inference** skill for full request/response formats.
 
 ## Step 4: Design the Entity Graph
 
@@ -114,8 +117,7 @@ async function handle(event: any, context: any) {
 ### Agent Task (Inference Worker)
 
 ```typescript
-const INFERENCE_URL = 'http://202.181.153.253:8000/inference/';
-const MODEL = { bucket: '1317', path: 'fs/model-name.zip' };
+const ENDPOINT = 'https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference';
 
 async function retry(action: () => Promise<any>, retries = 3): Promise<any> {
     for (let i = 0; i < retries; i++) {
@@ -127,12 +129,15 @@ async function retry(action: () => Promise<any>, retries = 3): Promise<any> {
 async function handle(event: any, context: any) {
     const { inputField } = event.payload;
     const data = await retry(async () => {
-        const response = await context.fetch(INFERENCE_URL, {
+        const response = await context.fetch(ENDPOINT, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: MODEL, input: { type: 'text', data: inputField }, options: { model_type: 'huggingface' } })
+            body: JSON.stringify({
+                model: { bucket: 1338, name: 'MODEL_NAME', version: 'v1.0.0' },
+                input: { text: inputField }
+            })
         });
-        if (!response.ok) throw new Error(`Inference failed: ${response.statusText}`);
+        if (!response.ok) throw new Error(`Inference failed: ${response.status}`);
         return response.json();
     });
     return { result: data.output };
@@ -142,7 +147,7 @@ async function handle(event: any, context: any) {
 ## Config Generation Rules
 
 - **Naming:** Agent/Task `name` Title Case, `alias` camelCase, directory kebab-case. Example: "Parking Violation Detector" -> alias `parkingViolationDetector` -> directory `parking-violation-detector`
-- **JSON Schema:** Types lowercase (`string`, `number`, `boolean`, `array`, `object`). Use `properties`, `required`, `type: object`. See **cef-cli** for full reference.
+- **JSON Schema:** Types lowercase (`string`, `number`, `boolean`, `array`, `object`). Use `properties`, `required`, `type: object`. See **cli** for full reference.
 - **Selectors:** Format `event_type:<your-event-type>`. Use `"*"` for catch-all.
 
 ## Starter Configs
@@ -331,8 +336,8 @@ Before presenting generated output, verify:
 
 ## Related Skills
 
-- **cef-agent-basics**: Handler signature, runtime API, entity hierarchy
-- **cef-cli**: Config schema, deploy commands, naming conventions, environment setup
-- **cef-inference**: Model catalog, request/response formats
-- **cef-cubby-state**: Storage API, state patterns
-- **cef-orchestration**: Multi-agent coordination patterns
+- **coding/handlers**: Handler signature, runtime API, entity hierarchy
+- **cli**: Config schema, deploy commands, naming conventions, environment setup
+- **inference**: Model catalog, request/response formats
+- **storage**: Storage API, state patterns
+- **coding/orchestration**: Multi-agent coordination patterns

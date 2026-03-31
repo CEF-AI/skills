@@ -7,7 +7,7 @@ description: Use when storing data, managing state, or sharing state between CEF
 
 Cubbies are SQLite databases managed by the Orchestrator. Each cubby is defined with a migration-based schema and can have multiple independent instances. Agents interact with cubbies through `ctx.cubbies.{alias}`.
 
-> **Reminder:** All handler code must be fully inline. No `import` or `require`. See the **cef-agent-basics** skill.
+> **Reminder:** All handler code must be fully inline. No `import` or `require`. See the **coding/handlers** skill.
 
 ## Accessing Cubbies
 
@@ -271,7 +271,7 @@ Alias rules: valid JS identifier, unique within the Agent Service. Never modify 
 
 ## Related Skills
 
-- **cef-agent-basics**: Handler signature, runtime API, entity hierarchy
-- **cef-cli**: Config schema, deploy commands, environment setup
-- **cef-orchestration**: Multi-agent state sharing via cubby
-- **cef-inference**: Storing inference results
+- **coding/handlers**: Handler signature, runtime API, entity hierarchy
+- **cli**: Config schema, deploy commands, environment setup
+- **coding/orchestration**: Multi-agent state sharing via cubby
+- **inference**: Storing inference results
