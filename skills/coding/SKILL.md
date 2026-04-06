@@ -138,7 +138,7 @@ workspaces:
 
 ## Handler Signature
 
-Every handler exports a single `handle` function:
+Every handler defines a single `handle` function:
 
 ```typescript
 async function handle(event: any, context: any) {
@@ -147,6 +147,8 @@ async function handle(event: any, context: any) {
     return { result: 'done' };
 }
 ```
+
+**Do NOT use `export` on the handler.** `export async function handle(...)` compiles to `module.exports = ...`, and `module` is not defined in a V8 isolate. The error at runtime is `module is not defined`. Use a plain `async function handle(...)` with no export keyword.
 
 - `event.payload` contains the input data
 - `context` provides: `cubbies.<alias>.query/exec()`, `agents.<alias>.<task>(payload)`, `streams.subscribe(id)`, `fetch(url, opts)`, `log(msg)`

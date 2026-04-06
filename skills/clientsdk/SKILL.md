@@ -157,6 +157,8 @@ await client.event.create("VIDEO_STREAM_DATA", {
 
 The first argument is the event type string (matches selector conditions in the config). The second is the payload; any JSON-serializable object.
 
+**Note:** A successful response means the event was accepted by the platform, not that the handler executed successfully. Handler errors are only visible in ROB Activity Logs. If you need to confirm handler execution, query the cubby for expected state changes after sending events.
+
 ## Agreement Management (GAR)
 
 Agreements authorize a wallet to interact with an agent service. **Required before sending events or querying cubbies.** Agreements are scoped to specific workspaces and streams.
