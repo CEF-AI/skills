@@ -239,21 +239,83 @@ controller.abort();
 
 ## Pattern: Publish to a Stream
 
-Push data into a CEF stream from external code.
+Push data into a CEF stream from external code. The backend handler subscribes to this stream via `context.streams.subscribe(streamId)` and iterates packets with `for await`.
 
 ```typescript
+// 1. Create stream
 const stream = await client.stream.create();
+
+// 2. Get publisher
 const publisher = await client.stream.publisher(stream.id);
 
-await publisher.publish({ event_type: "SENSOR_DATA", temperature: 22.5 });
+// 3. Send data packets
+await publisher.send({ message: { type: "SENSOR_DATA", temperature: 22.5 } });
+
+// 4. Signal completion
+await publisher.send({ message: { type: "COMPLETE" } });
+
+// 5. Close publisher
+await publisher.close();
 ```
 
 Or publish to an existing stream:
 
 ```typescript
 const publisher = await client.stream.publisher("existing_stream_id");
-await publisher.publish({ event_type: "IMAGE_DATA", image: base64Data });
+await publisher.send({ message: { type: "IMAGE_DATA", image: base64Data } });
+await publisher.close();
 ```
+
+### When to Use Events vs Streams
+
+Both `client.event.create()` and `client.stream.publisher().send()` deliver data to backend handlers, but they serve different purposes:
+
+- **Events** (`client.event.create()`): for discrete, one-shot signals. Data arrives in `event.payload` on the handler. Good for triggers, lifecycle signals, small payloads.
+- **Streams** (`client.stream.publisher().send()`): for continuous data after a trigger. Data arrives as raw packets; the handler must call `context.streams.subscribe(streamId)` and iterate with `for await`. Good for audio chunks, sensor feeds, game telemetry, or any high-frequency data.
+
+Use events alone when the payload is self-contained. Use events + streams when you need to trigger processing and then continuously feed data.
+
+### Full-Stack Pattern: Event Trigger + Stream Data
+
+This is the proven pattern from the gaming demo and conversation agent. The client sends a trigger event containing the `streamId`, then publishes continuous data to that stream. The handler receives the event, subscribes to the stream, and processes packets until completion.
+
+```typescript
+// Client side: create stream, trigger handler, then publish data
+const stream = await client.stream.create();
+const publisher = await client.stream.publisher(stream.id);
+
+// Trigger event tells the handler which stream to subscribe to
+await client.event.create("start_processing", {
+    streamId: stream.id,
+    entityId: "user-123",
+});
+
+// Continuous data goes through the stream
+for (const chunk of dataChunks) {
+    await publisher.send({ message: { type: "DATA_CHUNK", data: chunk } });
+}
+await publisher.send({ message: { type: "COMPLETE" } });
+await publisher.close();
+```
+
+```typescript
+// Handler side: receive trigger event, subscribe to stream, process packets
+async function handle(event: any, context: any) {
+    const { streamId, entityId } = event.payload;
+
+    const stream = await context.streams.subscribe(streamId);
+    for await (const packet of stream) {
+        const data = JSON.parse(bytesToString(packet.payload));
+        if (data.type === 'DATA_CHUNK') {
+            // process data.data
+        }
+        if (data.type === 'COMPLETE') break;
+    }
+    // finalize after stream ends
+}
+```
+
+**Common mistake:** putting continuous data (audio chunks, frames) into repeated `client.event.create()` calls instead of using a stream. Events work for this technically, but streams are designed for it: they use WebTransport/QUIC, handle backpressure, and the handler can process packets as they arrive in a `for await` loop. Conversely, if the handler expects stream packets via `context.streams.subscribe()`, sending that data via `client.event.create()` will not reach the subscription loop.
 
 ## Error Handling
 
@@ -305,6 +367,6 @@ type SignedWallet = JsonSigner | UriSigner | CereWalletSigner;
 
 ## Related Skills
 
-- **coding**: Handler signature, CEFContext, orchestration patterns, topology generation
+- **coding**: Handler signature, CEFContext, orchestration patterns, topology generation. **See Streams API section for how handlers subscribe to streams published from client SDK.**
 - **cli**: Config schema, deploy commands
 - **storage**: Cubby schema and migration config (queried from client SDK)

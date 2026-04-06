@@ -1,6 +1,6 @@
 ---
 name: cef-coding
-description: Use when writing CEF agent handler files, understanding the runtime API (CEFContext), learning the entity hierarchy, coordinating multiple agents (concierge, fan-out, pipeline, stream processor), or generating a complete CEF project from a natural language goal. Covers handler signature, V8 isolate constraints, orchestration patterns, topology generation (5-step process), starter configs, and handler templates.
+description: Use when writing CEF agent handler files, understanding the runtime API (CEFContext), learning the entity hierarchy and when to use each entity, coordinating multiple agents (concierge, fan-out, pipeline, stream processor), testing locally with cef dev, or generating a complete CEF project from a natural language goal. Covers handler signature, V8 isolate constraints, entity decision guide, orchestration patterns, local development, topology generation (5-step process), starter configs, and handler templates.
 ---
 
 # CEF Agent Coding
@@ -16,18 +16,125 @@ CEF AI is a distributed AI infrastructure platform. Agent services run on DDC Co
 ```
 AgentService (identified by agentServicePubKey)
 ├── Workspace (logical grouping; site, region, or project)
-│   └── Stream (event channel within a workspace)
-│       ├── Selector (filters which events enter the stream)
-│       └── Deployment (binds a stream to an engagement)
-│           └── Trigger (conditions that fire the engagement)
-├── Engagement (event handler; the orchestrator/concierge)
+│   ├── Stream (event channel within a workspace)
+│   │   ├── Selector (filters which events enter the stream)
+│   │   └── Deployment (activates an engagement on a stream)
+│   │       └── Trigger (conditions that fire the engagement)
+│   │           └── Engagement (handler code; runs when triggered)
+│   └── Cubby (SQLite database; 1:1 with workspace)
+│       └── Instance (lazily created per instanceId)
 ├── Agent (named service with one or more tasks)
 │   └── Task (individual handler function with typed params/returns)
-└── Cubby (SQLite database with migration schema)
-    └── Instance (lazily created per instanceId)
+└── Engagement definitions (code referenced by deployments)
 ```
 
-**How they wire together:** Events flow into Streams, Selectors filter them, Deployments bind streams to Engagements, Engagements orchestrate Agents, Agents execute Tasks, Tasks read/write Cubbies via SQL.
+**How they wire together:** Events flow into Streams. Selectors filter them. Deployments bind streams to Engagements. Without the full workspace -> stream -> deployment chain, an engagement is dead code that never executes. Engagements orchestrate Agents. Agents execute Tasks. Tasks read/write Cubbies via SQL.
+
+## When to Use What
+
+| I need to... | Use this entity | Why |
+|-|-|-|
+| React to incoming events and coordinate work | Engagement (wired via deployment) | Entry point for event processing; orchestrates agents |
+| Run inference, transform data, classify | Agent task | Discrete computation with typed I/O; reusable across engagements |
+| Process continuous data (audio, sensor, video) | Stream subscription in an engagement | `context.streams.subscribe()` gives you `for await` |
+| Store structured data per entity/session | Cubby (with instanceId) | SQLite gives you queries; instanceId gives you isolation |
+| Group related streams by site/region/project | Workspace | Logical grouping; one cubby per workspace |
+| Build a custom query engine over stream data | Raft | Stateful aggregator attached to a stream |
+| Call an external API | Agent task with `context.fetch()` | Keep external calls in agent tasks, not engagements |
+
+### Anti-Pattern: Engagement as Worker
+
+WRONG; engagement doing computation directly:
+
+```typescript
+// engagements/handler.ts -- BAD
+async function handle(event: any, context: any) {
+    // Don't do inference or heavy computation in engagements
+    const response = await context.fetch(INFERENCE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: { bucket: 1338, name: 'yolo11x_1280', version: 'v1.0.0' }, input: { image: event.payload.image } })
+    });
+    const data = await response.json();
+    return data;
+}
+```
+
+RIGHT; engagement orchestrates, agent computes:
+
+```typescript
+// engagements/handler.ts -- GOOD
+async function handle(event: any, context: any) {
+    const result = await context.agents.detector.detect({ image: event.payload.image });
+    await context.cubbies.siteData.exec(event.payload.entityId,
+        'INSERT INTO detections (entity_id, data) VALUES (?, ?)',
+        [event.payload.entityId, JSON.stringify(result)]);
+    return result;
+}
+
+// agents/detector/tasks/detect.ts
+const ENDPOINT = 'https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference';
+async function handle(event: any, context: any) {
+    const response = await context.fetch(ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: { bucket: 1338, name: 'yolo11x_1280', version: 'v1.0.0' }, input: { image: event.payload.image } })
+    });
+    if (!response.ok) throw new Error(`Inference failed: ${response.status}`);
+    const data = await response.json();
+    return { detections: data.output.detections };
+}
+```
+
+### Anti-Pattern: Cubbies as Data Transport
+
+WRONG; using cubby to pass data between agents:
+
+```typescript
+// Agent A writes to cubby
+await context.cubbies.store.exec(entityId, 'INSERT INTO temp (data) VALUES (?)', [JSON.stringify(result)]);
+// Later, engagement reads from cubby to pass to Agent B
+const rows = await context.cubbies.store.query(entityId, 'SELECT data FROM temp');
+await context.agents.agentB.process(JSON.parse(rows.rows[0][0]));
+```
+
+RIGHT; pass data directly through the engagement:
+
+```typescript
+const resultA = await context.agents.agentA.analyze(event.payload);
+const resultB = await context.agents.agentB.process(resultA);
+// Only write to cubby for persistence, not for data transport
+await context.cubbies.store.exec(entityId,
+    'INSERT INTO results (entity_id, data) VALUES (?, ?)',
+    [entityId, JSON.stringify(resultB)]);
+```
+
+### Anti-Pattern: Missing Wiring
+
+An engagement alone does nothing. It must be connected via the deployment chain:
+
+```yaml
+# This engagement will NEVER execute without a deployment referencing it:
+engagements:
+  - name: "My Handler"
+    file: ./engagements/handler.ts
+
+# You MUST also create:
+workspaces:
+  - name: "Default"
+    streams:
+      - name: "Events"
+        selectors:
+          - name: "all"
+            conditions: ["*"]
+        deployments:
+          - name: "Main"
+            engagement: "My Handler"    # This is what activates it
+            isActive: true
+            triggers:
+              - name: "all"
+                conditions: ["*"]
+```
 
 ## Handler Signature
 
@@ -77,6 +184,43 @@ Rules:
 - `name` fields are human-readable title case
 - Every `.ts` file is fully self-contained; no imports
 
+## Local Development
+
+Use `cef dev` (see **cli** skill for full command docs) to run handlers locally with full Context API emulation. No auth or environment variables needed.
+
+```bash
+cef dev                         # Start dev server at http://localhost:8787
+cef dev --persist               # Keep .cef-dev/ data after shutdown (default: cleared)
+```
+
+All `context.*` APIs work identically to production. Cubbies are backed by real SQLite (sql.js), so your SQL queries run for real. File changes hot-reload automatically.
+
+**Testing handlers locally:**
+
+```bash
+# Trigger an engagement
+curl -X POST http://localhost:8787/api/trigger \
+  -H 'Content-Type: application/json' \
+  -d '{"engagement": "My Handler", "payload": {"entityId": "test-1"}}'
+
+# Call an agent task directly
+curl -X POST http://localhost:8787/api/agents/myAgent/myTask \
+  -H 'Content-Type: application/json' \
+  -d '{"input": "test"}'
+
+# Push a stream packet
+curl -X POST http://localhost:8787/api/streams/my-stream-id/push \
+  -H 'Content-Type: application/json' \
+  -d '{"event_type": "DATA_CHUNK", "value": 42}'
+
+# Query a cubby
+curl -X POST http://localhost:8787/api/cubbies/siteData/query \
+  -H 'Content-Type: application/json' \
+  -d '{"sql": "SELECT * FROM detections", "instanceId": "default"}'
+```
+
+The dev server also provides a browser UI with topology view, stream push (single/bulk/file upload), cubby SQL editor, and live execution flow tracing.
+
 ---
 
 # Orchestration
@@ -108,13 +252,19 @@ try {
 
 ## Streams API
 
+Subscribe to a data stream published by external code (via `@cef-ai/client-sdk` `client.stream.publisher().send()`). The handler must explicitly subscribe; stream data does NOT arrive in `event.payload`.
+
 ```typescript
 const stream = await context.streams.subscribe('my-stream-id');
 
 for await (const packet of stream) {
-    const text = bytesToString(packet.payload);
-    const event = JSON.parse(text);
-    // handle event based on event.event_type
+    const data = JSON.parse(bytesToString(packet.payload));
+    if (data.type === 'DATA_CHUNK') {
+        // process chunk
+    }
+    if (data.type === 'COMPLETE') {
+        break;  // graceful termination
+    }
 }
 ```
 
@@ -129,6 +279,41 @@ function bytesToString(bytes: Uint8Array): string {
     return str;
 }
 ```
+
+### Events vs Streams: When to Use Which
+
+Both deliver data to handlers, but they serve different roles:
+
+| Transport | Client sends with | Handler receives via | Best for |
+|-|-|-|-|
+| Event Runtime | `client.event.create(type, payload)` | `event.payload` (already parsed) | Discrete triggers, lifecycle signals, small payloads |
+| Streams | `client.stream.publisher().send({message})` | `context.streams.subscribe(id)` + `for await` | Continuous data: audio chunks, sensor feeds, game telemetry |
+
+Events and streams work together. The typical pattern: client sends a trigger event containing the `streamId` (via Event Runtime), then publishes continuous data to that stream. The handler receives the event in `event.payload`, extracts `streamId`, subscribes, and processes packets until completion.
+
+```typescript
+async function handle(event: any, context: any) {
+    const { streamId, entityId } = event.payload;
+
+    // Subscribe to the stream the client created via client.stream.create()
+    const stream = await context.streams.subscribe(streamId);
+
+    for await (const packet of stream) {
+        const data = JSON.parse(bytesToString(packet.payload));
+        if (data.type === 'MY_DATA') {
+            await context.agents.myAgent.process(data);
+        }
+        if (data.type === 'COMPLETE') break;
+    }
+
+    // Finalize after stream ends
+    await context.cubbies.myStore.exec(entityId,
+        'UPDATE sessions SET status = ? WHERE id = ?',
+        ['completed', entityId]);
+}
+```
+
+**Key rule:** if the client publishes continuous data via `publisher.send()`, the handler must use `context.streams.subscribe(streamId)` to receive it. That data does not appear in `event.payload`. Conversely, data sent via `client.event.create()` arrives in `event.payload` and is not visible to stream subscriptions. Match both sides.
 
 ---
 
@@ -465,6 +650,8 @@ Generate complete, deployable CEF projects from natural language goals. Follow t
 5. All `file:` paths in config are relative to the config file.
 6. Generate fully working code, not stubs or TODOs.
 7. Follow the directory convention: `engagements/`, `agents/{name-kebab}/tasks/`.
+8. One cubby per workspace. Use multiple tables in migrations, not multiple cubbies.
+9. Every engagement must be wired via workspace -> stream -> deployment to execute.
 
 ## Step 1: Decompose the Goal
 
@@ -475,7 +662,7 @@ Generate complete, deployable CEF projects from natural language goals. Follow t
 | Text embedding | Agent with embedding task |
 | Sentiment/emotion analysis | Agent with classification task |
 | LLM reasoning/classification | Agent with LLM inference task |
-| State persistence | Cubby with SQL schema |
+| State persistence | Cubby with SQL schema (1:1 with workspace) |
 | Vector search / similarity | Cubby with sqlite-vec |
 | Real-time stream processing | Engagement with stream subscription |
 | Multi-model orchestration | Engagement (concierge) calling multiple agents |
@@ -516,8 +703,8 @@ See **inference** skill for full request/response formats.
 1. **How many agents?** One per distinct capability
 2. **How many tasks per agent?** Usually one; group related operations (e.g., createTopic, matchTopic, updateTopic)
 3. **How many engagements?** One per distinct event flow
-4. **How many cubbies?** One per data concern; separate by schema or access patterns
-5. **Workspace and stream?** One workspace per logical grouping, one stream per event source
+4. **How many cubbies?** One per workspace (1:1). Use multiple tables in migrations for different data needs.
+5. **Workspace and stream?** One workspace per logical grouping, one stream per event source. Wire each engagement via deployment.
 
 ## Step 5: Generate the Project
 
@@ -598,6 +785,7 @@ async function handle(event: any, context: any) {
 - **Naming:** Agent/Task `name` Title Case, `alias` camelCase, directory kebab-case. Example: "Parking Violation Detector" -> alias `parkingViolationDetector` -> directory `parking-violation-detector`
 - **JSON Schema:** Types lowercase (`string`, `number`, `boolean`, `array`, `object`). Use `properties`, `required`, `type: object`. See **cli** for full reference.
 - **Selectors:** Format `event_type:<your-event-type>`. Use `"*"` for catch-all.
+- **Cubbies:** One per workspace. All tables in one cubby via migrations.
 
 ## Starter Configs
 
@@ -622,11 +810,13 @@ agents:
           required: [image]
           type: object
 cubbies:
-  - alias: "detections"
-    name: "Detections"
+  - alias: "siteData"
+    name: "Site Data"
     migrations:
       - version: 1
-        up: "CREATE TABLE detections (id INTEGER PRIMARY KEY, entity_id TEXT, data TEXT, created_at TEXT)"
+        up: |
+          CREATE TABLE detections (id INTEGER PRIMARY KEY, entity_id TEXT, data TEXT, created_at TEXT);
+          CREATE TABLE processed (entity_id TEXT PRIMARY KEY, processed_at TEXT)
 workspaces:
   - name: "Detection Site"
     streams:
@@ -670,11 +860,13 @@ agents:
         alias: "embed"
         file: ./agents/embedding/tasks/embed.ts
 cubbies:
-  - alias: "nlpResults"
-    name: "NLP Results"
+  - alias: "nlpData"
+    name: "NLP Data"
     migrations:
       - version: 1
-        up: "CREATE TABLE results (id INTEGER PRIMARY KEY, entity_id TEXT, text TEXT, sentiment REAL, created_at TEXT)"
+        up: |
+          CREATE TABLE results (id INTEGER PRIMARY KEY, entity_id TEXT, text TEXT, sentiment REAL, created_at TEXT);
+          CREATE TABLE processed (entity_id TEXT PRIMARY KEY, processed_at TEXT)
 workspaces:
   - name: "NLP Workspace"
     streams:
@@ -711,8 +903,8 @@ agents:
         alias: "write"
         file: ./agents/writer/tasks/write.ts
 cubbies:
-  - alias: "syncState"
-    name: "Sync State"
+  - alias: "syncData"
+    name: "Sync Data"
     migrations:
       - version: 1
         up: "CREATE TABLE processed (event_id TEXT PRIMARY KEY, processed_at TEXT)"
@@ -752,11 +944,13 @@ agents:
         alias: "classify"
         file: ./agents/classifier/tasks/classify.ts
 cubbies:
-  - alias: "analytics"
-    name: "Analytics"
+  - alias: "analyticsData"
+    name: "Analytics Data"
     migrations:
       - version: 1
-        up: "CREATE TABLE events (id INTEGER PRIMARY KEY, entity_id TEXT, category TEXT, data TEXT, ts INTEGER)"
+        up: |
+          CREATE TABLE events (id INTEGER PRIMARY KEY, entity_id TEXT, category TEXT, data TEXT, ts INTEGER);
+          CREATE TABLE aggregates (entity_id TEXT PRIMARY KEY, event_count INTEGER, last_updated TEXT)
 workspaces:
   - name: "Analytics Site"
     streams:
@@ -782,12 +976,14 @@ Before presenting generated output, verify:
 - [ ] All inference calls use `context.fetch()`, never `context.models`
 - [ ] JSON Schema types are lowercase: `string`, `number`, `boolean`, `array`, `object`
 - [ ] `.env.example` lists all required environment variables
+- [ ] One cubby per workspace; all tables in migrations
+- [ ] Every engagement is wired via workspace -> stream -> deployment
 
 ---
 
 ## Related Skills
 
-- **cli**: Config schema, deploy commands, naming conventions, environment setup
+- **cli**: Config schema, deploy commands, local dev server, naming conventions, environment setup
 - **inference**: Model catalog, request/response formats, calling patterns
 - **storage**: Cubby API, state machine pattern, SQL patterns
 - **clientsdk**: Sending events from external code into CEF streams
