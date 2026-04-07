@@ -9,12 +9,14 @@ Cubbies are SQLite databases managed by the Orchestrator. Each cubby is defined 
 
 > **Reminder:** All handler code must be fully inline. No `import` or `require`. See the **coding** skill.
 
+> **CRITICAL: Always pass instanceId explicitly.** While the API technically allows omitting instanceId (it defaults to `"default"` when the first argument looks like SQL), this heuristic has caused silent write failures in production: the call returns successfully but zero rows are written. Always pass `'default'` for shared state or an entity-specific ID for per-entity isolation.
+
 ## Accessing Cubbies
 
 ```typescript
 // Access by alias (defined in cef.config.yaml)
-const result = await ctx.cubbies.mission_report.query('SELECT * FROM activity');
-await ctx.cubbies.mission_report.exec('INSERT INTO activity (drone_id, action) VALUES (?, ?)', ['drone_7', 'takeoff']);
+const result = await ctx.cubbies.mission_report.query('default', 'SELECT * FROM activity');
+await ctx.cubbies.mission_report.exec('default', 'INSERT INTO activity (drone_id, action) VALUES (?, ?)', ['drone_7', 'takeoff']);
 ```
 
 No factory function; cubbies are exposed as properties on `ctx.cubbies` keyed by the alias defined in the cubby definition.
@@ -35,13 +37,15 @@ The `instanceId` argument is optional. If the first string contains a space, it 
 
 ```typescript
 // Default instance
-await ctx.cubbies.store.query('SELECT * FROM items');
-await ctx.cubbies.store.query('SELECT * FROM items WHERE id = ?', [42]);
+await ctx.cubbies.store.query('default', 'SELECT * FROM items');
+await ctx.cubbies.store.query('default', 'SELECT * FROM items WHERE id = ?', [42]);
 
 // Explicit instance
 await ctx.cubbies.store.query('user_123', 'SELECT * FROM items');
 await ctx.cubbies.store.query('user_123', 'SELECT * FROM items WHERE id = ?', [42]);
 ```
+
+> **Always pass instanceId explicitly.** The heuristic is convenient but has caused silent failures in production. All examples in this skill use explicit instanceId for safety.
 
 ### Response Types
 
@@ -62,8 +66,8 @@ Instances are independent SQLite databases within a cubby definition. They are c
 await ctx.cubbies.player_data.exec('player_abc', 'INSERT INTO scores (match_id, score) VALUES (?, ?)', ['m1', 100]);
 await ctx.cubbies.player_data.exec('player_xyz', 'INSERT INTO scores (match_id, score) VALUES (?, ?)', ['m1', 200]);
 
-// Shared state: omit instanceId (uses "default")
-await ctx.cubbies.global_config.query('SELECT * FROM settings');
+// Shared state: pass 'default' explicitly
+await ctx.cubbies.global_config.query('default', 'SELECT * FROM settings');
 ```
 
 ## State Machine Pattern
@@ -130,12 +134,12 @@ if (result.rows.length === 0) {
 
 ```typescript
 // Schema: CREATE TABLE processed (event_id TEXT PRIMARY KEY, processed_at TEXT)
-const check = await ctx.cubbies.dedup.query('SELECT 1 FROM processed WHERE event_id = ?', [eventId]);
+const check = await ctx.cubbies.dedup.query('default', 'SELECT 1 FROM processed WHERE event_id = ?', [eventId]);
 if (check.rows.length > 0) return { skipped: true, reason: 'duplicate' };
 
 // ... process event ...
 
-await ctx.cubbies.dedup.exec(
+await ctx.cubbies.dedup.exec('default',
     'INSERT OR IGNORE INTO processed (event_id, processed_at) VALUES (?, ?)',
     [eventId, new Date().toISOString()]
 );
@@ -144,7 +148,7 @@ await ctx.cubbies.dedup.exec(
 ### UPSERT
 
 ```typescript
-await ctx.cubbies.store.exec(
+await ctx.cubbies.store.exec('default',
     `INSERT INTO entity_state (id, count, updated_at) VALUES (?, 1, ?)
      ON CONFLICT(id) DO UPDATE SET count = count + 1, updated_at = ?`,
     [entityId, now, now]
@@ -230,25 +234,36 @@ The SQLite engine includes `sqlite-vec` for vector similarity search.
 
 ```typescript
 // Create vector table
-await ctx.cubbies.embeddings.exec(`
+await ctx.cubbies.embeddings.exec('default', `
     CREATE VIRTUAL TABLE IF NOT EXISTS vec_items
     USING vec0(embedding float[768], +id TEXT, +metadata TEXT)
 `);
 
 // Insert embedding
-await ctx.cubbies.embeddings.exec(
+await ctx.cubbies.embeddings.exec('default',
     'INSERT INTO vec_items (id, embedding, metadata) VALUES (?, ?, ?)',
     ['chunk_1', JSON.stringify(embedding), JSON.stringify({ source: 'wiki' })]
 );
 
 // KNN search
-const results = await ctx.cubbies.embeddings.query(
+const results = await ctx.cubbies.embeddings.query('default',
     `SELECT id, metadata, distance
      FROM vec_items
      WHERE embedding MATCH ?
      ORDER BY distance LIMIT ?`,
     [JSON.stringify(queryEmbedding), 5]
 );
+```
+
+## Schema Definition
+
+Define table schemas in `cef.config.yaml` migrations, not in handler code. `CREATE TABLE IF NOT EXISTS` inside a handler is unreliable: if the handler crashes before reaching that line, the table never gets created and all subsequent queries fail silently.
+
+```yaml
+# Always define schema in migrations
+migrations:
+  - version: 1
+    up: "CREATE TABLE items (id INTEGER PRIMARY KEY, data TEXT, created_at TEXT)"
 ```
 
 ## Config (cef.config.yaml)
@@ -268,6 +283,17 @@ cubbies:
 ```
 
 Alias rules: valid JS identifier, unique within the Agent Service. Never modify existing migrations; only append new versions.
+
+## Redeploy After Cubby Creation
+
+After creating a new cubby via the orchestrator API, `ctx.cubbies.{alias}` will be `undefined` in handler code until the engagement is redeployed. The cubby alias only appears in `ctx.cubbies` after a deploy picks up the new definition.
+
+```bash
+# After creating cubby via API, redeploy engagement:
+cef deploy --only engagement
+```
+
+If your handler crashes with `Cannot read properties of undefined (reading 'exec')` on a cubby alias, redeploy.
 
 ## Related Skills
 
