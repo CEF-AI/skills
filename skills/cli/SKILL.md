@@ -27,6 +27,8 @@ cef deploy --dry-run                              # Preview without calling API
 cef deploy --only agent                           # Deploy single entity type
 ```
 
+> **Prefer `--only` for iterative deploys.** A bare `cef deploy` validates all workspace IDs against the orchestrator. If a workspace was created via ROB UI or a different path and the orchestrator doesn't list it, the CLI will log a warning and keep the existing ID. For routine handler updates, use `cef deploy --only engagement` or `cef deploy --only agent` to skip workspace validation entirely.
+
 `--only` types: `engagement`, `agent`, `cubby`, `workspace`, `stream`, `deployment`, `raft`
 
 **Stale ID detection:** If `agentServicePubKey` changes, the CLI prompts to clear existing IDs to avoid deploying to the wrong service.
@@ -156,8 +158,10 @@ cef dev --persist                   # Keep .cef-dev/ data after server stops
 | `/api/cubbies/:alias/exec` | POST | SQL write. Body: `{ "sql": "INSERT ...", "params": [], "instanceId": "default" }` |
 | `/api/cubbies/:alias/instances` | GET | List cubby instances |
 | `/api/topology` | GET | View topology JSON |
-| `/api/executions` | GET | Get execution logs |
+| `/api/executions` | GET | Get all execution logs |
 | `/ws` | WS | Real-time logs and trace events |
+
+**Note:** There is no `/api/executions/:id` endpoint to poll for a specific execution's result. After triggering via `/api/trigger`, check the cubby for expected state changes or watch the WebSocket (`/ws`) for completion events.
 
 ### playground test
 

@@ -158,7 +158,7 @@ async function handle(event: any, context: any) {
 ```typescript
 interface CEFContext {
     log(...args: unknown[]): void;
-    cubbies: { [alias: string]: { query(instanceId?: string, sql: string, params?: unknown[]): Promise<any>; exec(instanceId?: string, sql: string, params?: unknown[]): Promise<any> } };
+    cubbies: { [alias: string]: { query(instanceId: string, sql: string, params?: unknown[]): Promise<any>; exec(instanceId: string, sql: string, params?: unknown[]): Promise<any> } };
     agents: { [agentAlias: string]: { [taskAlias: string]: (input: unknown) => Promise<unknown> } };
     streams: { subscribe(streamId: string): Promise<AsyncIterable<{ payload: Uint8Array }>> };
     fetch(url: string, options?: { method?: string; headers?: Record<string, string>; body?: string }): Promise<{ ok: boolean; status: number; json(): Promise<unknown>; text(): Promise<string> }>;
@@ -231,6 +231,8 @@ Patterns for wiring multiple agents together: coordinating, dispatching, streami
 
 ## Agent-to-Agent Calls
 
+> **Always `await` agent calls.** Fire-and-forget calls (no `await`) are silently killed when the handler returns. The V8 isolate terminates immediately, cancelling any pending promises. The agent may never execute or be killed mid-execution. Always use `await` or collect promises for `Promise.all()`.
+
 CEF provides a dynamic proxy for inter-agent communication:
 
 ```typescript
@@ -249,6 +251,20 @@ try {
     const result = await context.agents.myAgent.doWork(payload);
 } catch (err) {
     context.log(`Agent call failed: ${err}`);
+}
+```
+
+### Agent Parameter Wrapping
+
+When an engagement calls `context.agents.myAgent.myTask({ pageId })`, the agent receives the arguments wrapped in a `payload` property. Direct destructuring fails silently (variables are `undefined`, no error).
+
+Use this defensive unwrap at the top of every agent task handler:
+
+```typescript
+async function handle(event: any, context: any) {
+    const params = event.payload?.payload ?? event.payload;
+    const { pageId, title } = params;
+    // ... rest of handler
 }
 ```
 
@@ -732,7 +748,7 @@ async function handle(event: any, context: any) {
 
     // Direct processing
     const result = await context.agents.myAgent.myTask({ ...event.payload });
-    await context.cubbies.myStore.exec(
+    await context.cubbies.myStore.exec('default',
         'INSERT INTO results (id, data, created_at) VALUES (?, ?, ?)',
         [field1, JSON.stringify(result), new Date().toISOString()]
     );
@@ -743,7 +759,7 @@ async function handle(event: any, context: any) {
         const data = JSON.parse(bytesToString(packet.payload));
         if (data.event_type === 'MY_EVENT') {
             const r = await context.agents.myAgent.myTask(data);
-            await context.cubbies.myStore.exec(
+            await context.cubbies.myStore.exec('default',
                 'INSERT INTO results (id, data, created_at) VALUES (?, ?, ?)',
                 [data.id, JSON.stringify(r), new Date().toISOString()]
             );
@@ -751,6 +767,30 @@ async function handle(event: any, context: any) {
     }
 }
 ```
+
+### Engagement (Direct Event Processing)
+
+The most common pattern for discrete ingest jobs. Event arrives, handler processes, writes to cubby, returns. No stream subscription needed.
+
+```typescript
+async function handle(event: any, context: any) {
+    const { entityId, data } = event.payload;
+    if (!entityId) return { error: 'missing entityId' };
+
+    // Process via agent
+    const result = await context.agents.myAgent.analyze({ data });
+
+    // Persist result
+    await context.cubbies.myStore.exec('default',
+        'INSERT INTO results (entity_id, data, processed_at) VALUES (?, ?, ?) ON CONFLICT(entity_id) DO UPDATE SET data = excluded.data, processed_at = excluded.processed_at',
+        [entityId, JSON.stringify(result), new Date().toISOString()]
+    );
+
+    return { ok: true, entityId };
+}
+```
+
+Use this when each event is self-contained. For continuous data (audio, sensor feeds), use stream subscription instead.
 
 ### Agent Task (Inference Worker)
 
@@ -980,6 +1020,8 @@ Before presenting generated output, verify:
 - [ ] `.env.example` lists all required environment variables
 - [ ] One cubby per workspace; all tables in migrations
 - [ ] Every engagement is wired via workspace -> stream -> deployment
+- [ ] Every `.query()` and `.exec()` call passes an explicit instanceId (`'default'` or entity-specific)
+- [ ] Every `context.agents.*.*()` call is `await`-ed (no fire-and-forget)
 
 ---
 

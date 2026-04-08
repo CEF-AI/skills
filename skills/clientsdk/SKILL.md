@@ -194,6 +194,46 @@ try {
 }
 ```
 
+### Agreement Expiry (24h TTL)
+
+Agreements expire after their TTL (default 24 hours). Long-running ingest jobs that span multiple hours will fail when the agreement expires. The error message is `"No agreement exists between user and agent service"` but it may not surface clearly if errors are being swallowed.
+
+**Reset pattern for long-running ingests:**
+
+```typescript
+let clientReady = false;
+
+async function ensureAgreement(client: ClientSdk) {
+    if (clientReady) return;
+    try {
+        await client.agreement.create(AGENT_SERVICE, {
+            metadata: {
+                scopes: [{
+                    context: { workspace_id: WORKSPACE, stream_id: STREAM_ID },
+                }],
+            },
+        }, 86400);
+    } catch (err) {
+        if (!err.message?.includes("409")) throw err;
+    }
+    clientReady = true;
+}
+
+async function sendEvent(client: ClientSdk, eventType: string, payload: unknown) {
+    try {
+        await client.event.create(eventType, payload);
+    } catch (err) {
+        if (err.message?.includes("No agreement exists")) {
+            clientReady = false;
+            await ensureAgreement(client);
+            await client.event.create(eventType, payload);
+        } else {
+            throw err;
+        }
+    }
+}
+```
+
 ### Update and Revoke
 
 ```typescript
