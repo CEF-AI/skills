@@ -85,8 +85,9 @@ async function handle(event: any, ctx: any) {
         'SELECT * FROM entity_state WHERE id = ?',
         [entityId]
     );
+    const existingRows = existing.rows ?? []; // guard: deployed runtime returns null, not [] on empty
 
-    if (existing.rows.length === 0) {
+    if (existingRows.length === 0) {
         // Create
         await ctx.cubbies.my_domain.exec(
             instanceId,
@@ -95,7 +96,7 @@ async function handle(event: any, ctx: any) {
         );
     } else {
         // Update
-        const currentCount = existing.rows[0][1];
+        const currentCount = existingRows[0][1];
         await ctx.cubbies.my_domain.exec(
             instanceId,
             'UPDATE entity_state SET count = ?, updated_at = ? WHERE id = ?',
@@ -119,14 +120,22 @@ async function handle(event: any, ctx: any) {
 
 ## Safe Reads
 
-SELECT queries return an empty `rows` array when no data exists. No try/catch needed for missing data.
+**`rows` can be `null` on the deployed platform when no data exists.** Local `cef dev` returns an empty array `[]`, but the deployed runtime returns `null`. Always guard with `?? []` before accessing `.length` or indexing — this is the most common cause of stage-only crashes.
 
 ```typescript
+// ✅ Safe on both local dev and deployed
 const result = await ctx.cubbies.store.query(instanceId, 'SELECT * FROM items WHERE id = ?', [itemId]);
-if (result.rows.length === 0) {
+const rows = result.rows ?? [];
+if (rows.length === 0) {
     // No data found; use defaults
 }
+const firstRow = rows[0]; // safe
+
+// ❌ Crashes on stage with "Cannot read properties of null (reading 'length')"
+if (result.rows.length === 0) { ... }
 ```
+
+Apply this guard to every query result before reading `.length` or indexing. Confirmed platform difference: deployed cubby runtime vs local sql.js in `cef dev`.
 
 ## Deduplication
 

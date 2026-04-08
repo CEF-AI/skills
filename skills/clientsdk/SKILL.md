@@ -35,10 +35,23 @@ const wallet = {
     signRawBytes: (bytes) => signer.sign(bytes),
 };
 
-// 3. SDK instance
+// 3. SDK instance — devnet
 const client = new ClientSdk({
     url: "https://compute-1.devnet.ddc-dragon.com",
     garUrl: "https://gar.compute.dev.ddcdragon.com/",  // GAR endpoint for agreements
+    context,
+    wallet,
+});
+
+// 3. SDK instance — stage (SDK 0.0.12+)
+// ⚠️ REQUIRED on stage: pass eventRuntimeUrl explicitly.
+// The stage orchestrator returns 404 on stream lookup; the SDK cannot derive
+// the event push URL from the cluster URL. Omitting eventRuntimeUrl means
+// every client.event.create() call fails with a 404, silently or not at all.
+const stageClient = new ClientSdk({
+    url: "https://orchestrator.compute.test.ddcdragon.com",
+    garUrl: "https://gar.compute.test.ddcdragon.com/",
+    eventRuntimeUrl: "https://events.compute.test.ddcdragon.com",  // required on stage
     context,
     wallet,
 });
@@ -390,8 +403,10 @@ try {
 
 ```typescript
 interface ClientConfig {
-    url: string;                    // Cluster URL
+    url: string;                    // Cluster / orchestrator URL
     garUrl?: string;                // GAR endpoint (required for agreements)
+    eventRuntimeUrl?: string;       // Event push URL — required on stage (derived from cluster on devnet)
+    agentRuntimeUrl?: string;       // Agent runtime URL — optional override
     context: ClientContext;         // Agent service + workspace + stream
     wallet: SignedWallet | EmbedWallet;
     webTransport?: { ... };        // Optional WebTransport config
