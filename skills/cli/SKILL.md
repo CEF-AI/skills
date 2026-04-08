@@ -27,7 +27,7 @@ cef deploy --dry-run                              # Preview without calling API
 cef deploy --only agent                           # Deploy single entity type
 ```
 
-> **Always use `--only` for iterative deploys.** A bare `cef deploy` validates all workspace IDs against the orchestrator. If a workspace was not registered via the orchestrator API and doesn't appear in the list, the CLI silently clears `workspaceId` from your config and attempts to create a new one — orphaning all your streams. For routine handler/agent updates, always use `cef deploy --only engagement` or `cef deploy --only agent`.
+> **Prefer `--only` for iterative deploys.** A bare `cef deploy` validates all workspace IDs against the orchestrator. If a workspace was created outside the orchestrator API (e.g. via ROB UI), the CLI logs a warning but keeps the existing ID. For routine handler/agent updates, use `cef deploy --only engagement` or `cef deploy --only agent` to skip workspace validation entirely.
 
 > **`--only engagement` side effect:** Every run creates an extra "Mock Workspace YYYY-MM-DD" workspace as a CLI test artifact. Clean these up after each deploy: `DELETE $CEF_ORCHESTRATOR_URL/api/v1/agent-services/$PUBKEY/workspaces/{id}` — the orphaned workspace ID appears in `GET .../workspaces`.
 
@@ -479,23 +479,21 @@ Loaded from `.env` in the config file directory (or `--output-dir` for clone).
 
 | Variable | Required | Description |
 |-|-|-|
-| `CEF_AUTH_TOKEN` | Yes (all API commands) | Bearer JWT from ROB UI DevTools → Network → `verify` request → Response. **Environment-scoped** — a devnet token 401s on stage and vice versa. JWT `aud` field identifies the environment (`wallet.dev.cere.io` vs `wallet.stage.cere.io`). |
-| `CEF_ORCHESTRATOR_URL` | Yes (deploy, status, clone, delete) | Devnet: `https://compute-1.devnet.ddc-dragon.com/orchestrator` · Stage: `https://orchestrator.compute.test.ddcdragon.com` (**no `/orchestrator` suffix on stage**) |
-| `CEF_ROB_API_URL` | Yes (services, create-service, workspace/cubby ops) | Devnet: `https://rob.compute.dev.ddcdragon.com/rms-node-backend` · Stage: `https://rob.compute.test.ddcdragon.com/rms-node-backend` |
+| `CEF_AUTH_TOKEN` | Yes (all API commands) | Bearer JWT from ROB UI DevTools → Network → `verify` request → Response. JWT `aud` field identifies the environment. |
+| `CEF_ORCHESTRATOR_URL` | Yes (deploy, status, clone, delete) | `https://orchestrator.compute.test.ddcdragon.com` |
+| `CEF_ROB_API_URL` | Yes (services, create-service, workspace/cubby ops) | `https://rob.compute.test.ddcdragon.com/rms-node-backend` |
 | `CEF_ROB_ORIGIN` | No | Override Origin/Referer header; auto-detected if unset |
 
 **Note:** `cef dev` does not require any environment variables.
 
 ### Environment URL Reference
 
-| | Devnet | Stage |
-|-|-|-|
-| Orchestrator | `https://compute-1.devnet.ddc-dragon.com/orchestrator` | `https://orchestrator.compute.test.ddcdragon.com` |
-| ROB UI | `https://rob.compute.dev.ddcdragon.com/` | `https://rob.compute.test.ddcdragon.com/` |
-| ROB API | `https://rob.compute.dev.ddcdragon.com/rms-node-backend` | `https://rob.compute.test.ddcdragon.com/rms-node-backend` |
-| GAR | `https://gar.compute.dev.ddcdragon.com/` | `https://gar.compute.test.ddcdragon.com/` |
-
-**Stage orchestrator has no `/orchestrator` path suffix** — unlike devnet. Using the devnet URL pattern on stage causes 404 on every deploy command.
+| Service | URL |
+|-|-|
+| Orchestrator | `https://orchestrator.compute.test.ddcdragon.com` |
+| ROB UI | `https://rob.compute.test.ddcdragon.com/` |
+| ROB API | `https://rob.compute.test.ddcdragon.com/rms-node-backend` |
+| GAR | `https://gar.compute.test.ddcdragon.com/` |
 
 ## All Flags Reference
 

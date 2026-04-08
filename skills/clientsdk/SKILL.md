@@ -35,23 +35,14 @@ const wallet = {
     signRawBytes: (bytes) => signer.sign(bytes),
 };
 
-// 3. SDK instance — devnet
-const client = new ClientSdk({
-    url: "https://compute-1.devnet.ddc-dragon.com",
-    garUrl: "https://gar.compute.dev.ddcdragon.com/",  // GAR endpoint for agreements
-    context,
-    wallet,
-});
-
-// 3. SDK instance — stage (SDK 0.0.12+)
-// ⚠️ REQUIRED on stage: pass eventRuntimeUrl explicitly.
-// The stage orchestrator returns 404 on stream lookup; the SDK cannot derive
-// the event push URL from the cluster URL. Omitting eventRuntimeUrl means
+// 3. SDK instance
+// ⚠️ eventRuntimeUrl is REQUIRED: the orchestrator returns 404 on stream lookup;
+// the SDK cannot derive the event push URL from the cluster URL. Omitting it means
 // every client.event.create() call fails with a 404, silently or not at all.
-const stageClient = new ClientSdk({
+const client = new ClientSdk({
     url: "https://orchestrator.compute.test.ddcdragon.com",
     garUrl: "https://gar.compute.test.ddcdragon.com/",
-    eventRuntimeUrl: "https://events.compute.test.ddcdragon.com",  // required on stage
+    eventRuntimeUrl: "https://events.compute.test.ddcdragon.com",  // required
     context,
     wallet,
 });
@@ -99,8 +90,9 @@ Most integrations follow this pattern: create an agreement (once), then send eve
 const { ClientSdk, ClientContext, JsonSigner } = require("@cef-ai/client-sdk");
 
 const AGENT_SERVICE = "0xc3d62ac...";
-const BASE_URL = "https://compute-1.devnet.ddc-dragon.com";
-const GAR_URL = "https://gar.compute.dev.ddcdragon.com/";
+const BASE_URL = "https://orchestrator.compute.test.ddcdragon.com";
+const GAR_URL = "https://gar.compute.test.ddcdragon.com/";
+const EVENT_RUNTIME_URL = "https://events.compute.test.ddcdragon.com";
 const STREAM_ID = "stream-f493c12e";
 const WORKSPACE = "2456";
 
@@ -123,6 +115,7 @@ async function main() {
     const client = new ClientSdk({
         url: BASE_URL,
         garUrl: GAR_URL,
+        eventRuntimeUrl: EVENT_RUNTIME_URL,
         context,
         wallet,
     });
@@ -405,7 +398,7 @@ try {
 interface ClientConfig {
     url: string;                    // Cluster / orchestrator URL
     garUrl?: string;                // GAR endpoint (required for agreements)
-    eventRuntimeUrl?: string;       // Event push URL — required on stage (derived from cluster on devnet)
+    eventRuntimeUrl?: string;       // Event push URL — required (SDK cannot derive it from cluster URL)
     agentRuntimeUrl?: string;       // Agent runtime URL — optional override
     context: ClientContext;         // Agent service + workspace + stream
     wallet: SignedWallet | EmbedWallet;
