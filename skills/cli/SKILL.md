@@ -27,7 +27,9 @@ cef deploy --dry-run                              # Preview without calling API
 cef deploy --only agent                           # Deploy single entity type
 ```
 
-> **Prefer `--only` for iterative deploys.** A bare `cef deploy` validates all workspace IDs against the orchestrator. If a workspace was created via ROB UI or a different path and the orchestrator doesn't list it, the CLI will log a warning and keep the existing ID. For routine handler updates, use `cef deploy --only engagement` or `cef deploy --only agent` to skip workspace validation entirely.
+> **Prefer `--only` for iterative deploys.** A bare `cef deploy` validates all workspace IDs against the orchestrator. If a workspace was created outside the orchestrator API (e.g. via ROB UI), the CLI logs a warning but keeps the existing ID. For routine handler/agent updates, use `cef deploy --only engagement` or `cef deploy --only agent` to skip workspace validation entirely.
+
+> **`--only engagement` side effect:** Every run creates an extra "Mock Workspace YYYY-MM-DD" workspace as a CLI test artifact. Clean these up after each deploy: `DELETE $CEF_ORCHESTRATOR_URL/api/v1/agent-services/$PUBKEY/workspaces/{id}` — the orphaned workspace ID appears in `GET .../workspaces`.
 
 `--only` types: `engagement`, `agent`, `cubby`, `workspace`, `stream`, `deployment`, `raft`
 
@@ -122,6 +124,9 @@ This is the reverse of deploy order. You must delete dependents first. For examp
 Starts a local development server with full runtime emulation. No auth or environment variables required.
 
 ```bash
+# ⚠️ If `cef dev` from PATH produces no output and exits silently, use the full path:
+node /path/to/global/node_modules/@cef-ai/cli/dist/cli.js dev --config cef.config.yaml
+
 cef dev                             # Start at default port 8787
 cef dev --config ./my-agent/cef.config.yaml  # Custom config
 cef dev --port 3000                 # Custom port
@@ -474,12 +479,21 @@ Loaded from `.env` in the config file directory (or `--output-dir` for clone).
 
 | Variable | Required | Description |
 |-|-|-|
-| `CEF_AUTH_TOKEN` | Yes (all API commands) | Bearer JWT (same as ROB UI) |
-| `CEF_ORCHESTRATOR_URL` | Yes (deploy, status, clone, delete) | e.g. `https://compute-1.devnet.ddc-dragon.com/orchestrator` |
-| `CEF_ROB_API_URL` | Yes (services, create-service, workspace/cubby ops) | e.g. `https://api.rob.dev.cere.io/rms-node-backend` |
+| `CEF_AUTH_TOKEN` | Yes (all API commands) | Bearer JWT from ROB UI DevTools → Network → `verify` request → Response. JWT `aud` field identifies the environment. |
+| `CEF_ORCHESTRATOR_URL` | Yes (deploy, status, clone, delete) | `https://orchestrator.compute.test.ddcdragon.com` |
+| `CEF_ROB_API_URL` | Yes (services, create-service, workspace/cubby ops) | `https://rob.compute.test.ddcdragon.com/rms-node-backend` |
 | `CEF_ROB_ORIGIN` | No | Override Origin/Referer header; auto-detected if unset |
 
 **Note:** `cef dev` does not require any environment variables.
+
+### Environment URL Reference
+
+| Service | URL |
+|-|-|
+| Orchestrator | `https://orchestrator.compute.test.ddcdragon.com` |
+| ROB UI | `https://rob.compute.test.ddcdragon.com/` |
+| ROB API | `https://rob.compute.test.ddcdragon.com/rms-node-backend` |
+| GAR | `https://gar.compute.test.ddcdragon.com/` |
 
 ## All Flags Reference
 
@@ -512,6 +526,8 @@ Loaded from `.env` in the config file directory (or `--output-dir` for clone).
 | Engagement | Title Case | N/A | N/A |
 
 Example: Agent "Object Detection" -> alias `objectDetection` -> directory `object-detection`
+
+> **`alias` must be a valid JavaScript identifier.** Hyphens are rejected at deploy time with `INVALID_ALIAS`. `my-agent` → invalid; `myAgent` → valid. This applies to both agent aliases and task aliases, since they map to `ctx.agents.myAgent.myTask()` in handler code.
 
 ## Selector Conditions
 
