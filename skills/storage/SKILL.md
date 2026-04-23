@@ -242,7 +242,7 @@ async function handle(event: any, ctx: any) {
 The SQLite engine includes `sqlite-vec` for vector similarity search.
 
 ```typescript
-// Create vector table
+// Create vector table (width must match the embedding dimension)
 await ctx.cubbies.embeddings.exec('default', `
     CREATE VIRTUAL TABLE IF NOT EXISTS vec_items
     USING vec0(embedding float[768], +id TEXT, +metadata TEXT)
@@ -263,6 +263,8 @@ const results = await ctx.cubbies.embeddings.query('default',
     [JSON.stringify(queryEmbedding), 5]
 );
 ```
+
+> **Tip:** The `embedding` model (Qwen3 4B) supports MRL dimensions from 32 to 2560. Request a smaller dimension via `context.models.embedding.infer({ text, dimensions: 768 })` to cut cubby row size and speed up `sqlite-vec` search. Keep the `float[N]` column width matching the dimension you request. See the **inference** skill.
 
 ## Schema Definition
 
@@ -306,6 +308,6 @@ If your handler crashes with `Cannot read properties of undefined (reading 'exec
 
 ## Related Skills
 
-- **coding**: Handler signature, runtime API, orchestration patterns, topology generation
-- **cli**: Config schema, deploy commands, environment setup
-- **inference**: Storing inference results
+- **coding**: Handler signature, Context API (models, agents, streams, rafts, image, emit, workspace), orchestration patterns, topology generation. For cropping/resizing/encoding images before hitting a model, use `context.image.*` (native, ~5ms) from the coding skill — do not store binary image bytes in a cubby for that purpose.
+- **cli**: Config schema (cubby definitions, migrations), deploy commands, environment setup
+- **inference**: `context.models.<alias>.infer/.stream`, the 16-model catalog, and the `embedding` model's MRL dimensions for vector storage

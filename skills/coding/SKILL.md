@@ -1,6 +1,6 @@
 ---
 name: cef-coding
-description: Use when writing CEF agent handler files, understanding the runtime API (CEFContext), learning the entity hierarchy and when to use each entity, coordinating multiple agents (concierge, fan-out, pipeline, stream processor), testing locally with cef dev, or generating a complete CEF project from a natural language goal. Covers handler signature, V8 isolate constraints, entity decision guide, orchestration patterns, local development, topology generation (5-step process), starter configs, and handler templates.
+description: Use when writing CEF agent handler files, understanding the Context API (context.models, context.agents, context.cubbies, context.streams, context.rafts, context.image, context.emit, context.fetch, context.workspace, context.log), learning the entity hierarchy and when to use each entity, coordinating multiple agents (concierge, fan-out, pipeline, stream processor), testing locally with cef dev, or generating a complete CEF project from a natural language goal. Covers handler signature, V8 isolate constraints, entity decision guide, orchestration patterns, local development, topology generation (5-step process), starter configs, and handler templates.
 ---
 
 # CEF Agent Coding
@@ -44,19 +44,14 @@ AgentService (identified by agentServicePubKey)
 
 ### Anti-Pattern: Engagement as Worker
 
-WRONG; engagement doing computation directly:
+WRONG; engagement doing inference directly:
 
 ```typescript
 // engagements/handler.ts -- BAD
 async function handle(event: any, context: any) {
-    // Don't do inference or heavy computation in engagements
-    const response = await context.fetch(INFERENCE_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: { bucket: 1338, name: 'yolo11x_1280', version: 'v1.0.0' }, input: { image: event.payload.image } })
-    });
-    const data = await response.json();
-    return data;
+    // Don't call models directly from engagements
+    const result = await context.models.yoloXL.infer({ image: event.payload.image });
+    return result;
 }
 ```
 
@@ -73,18 +68,31 @@ async function handle(event: any, context: any) {
 }
 
 // agents/detector/tasks/detect.ts
-const ENDPOINT = 'https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference';
 async function handle(event: any, context: any) {
-    const response = await context.fetch(ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: { bucket: 1338, name: 'yolo11x_1280', version: 'v1.0.0' }, input: { image: event.payload.image } })
-    });
-    if (!response.ok) throw new Error(`Inference failed: ${response.status}`);
-    const data = await response.json();
-    return { detections: data.output.detections };
+    const result = await context.models.yoloXL.infer({ image: event.payload.image });
+    return { detections: result.detections };
 }
 ```
+
+### Anti-Pattern: Raw HTTP for inference
+
+WRONG; hardcoded inference URL + body shape:
+
+```typescript
+// BAD — this pattern is obsolete. There is no public inference URL to call.
+const res = await context.fetch('https://.../inference', {
+    method: 'POST',
+    body: JSON.stringify({ model: { bucket: 1338, name: '...', version: '...' }, input: { image } })
+});
+```
+
+RIGHT; `context.models.<alias>.infer()` is the only inference path. The runtime handles routing, auth, retries, and metering.
+
+```typescript
+const result = await context.models.yolo.infer({ image });
+```
+
+`context.fetch()` is still available but **only for calling third-party HTTP services** (e.g. a vendor webhook, an external REST API). Inference never goes through `context.fetch()`.
 
 ### Anti-Pattern: Cubbies as Data Transport
 
@@ -151,19 +159,95 @@ async function handle(event: any, context: any) {
 **Do NOT use `export` on the handler.** `export async function handle(...)` compiles to `module.exports = ...`, and `module` is not defined in a V8 isolate. The error at runtime is `module is not defined`. Use a plain `async function handle(...)` with no export keyword.
 
 - `event.payload` contains the input data
-- `context` provides: `cubbies.<alias>.query/exec()`, `agents.<alias>.<task>(payload)`, `streams.subscribe(id)`, `fetch(url, opts)`, `log(msg)`
+- `context` provides: `models.<alias>.infer/.stream()`, `agents.<alias>.<task>(payload)`, `cubbies.<alias>.query/exec()`, `streams.subscribe(id)`, `rafts.<alias>.query()`, `image.*`, `emit(eventType, payload)`, `fetch(url, opts)` (external HTTP only), `workspace`, `log(...)`.
 
 ## CEFContext Shape
 
 ```typescript
 interface CEFContext {
     log(...args: unknown[]): void;
-    cubbies: { [alias: string]: { query(instanceId: string, sql: string, params?: unknown[]): Promise<any>; exec(instanceId: string, sql: string, params?: unknown[]): Promise<any> } };
-    agents: { [agentAlias: string]: { [taskAlias: string]: (input: unknown) => Promise<unknown> } };
-    streams: { subscribe(streamId: string): Promise<AsyncIterable<{ payload: Uint8Array }>> };
-    fetch(url: string, options?: { method?: string; headers?: Record<string, string>; body?: string }): Promise<{ ok: boolean; status: number; json(): Promise<unknown>; text(): Promise<string> }>;
+
+    // Inference — aliases + schemas come from your Agent Service's model registry.
+    // Streaming models expose both infer() and stream(); non-streaming expose only infer().
+    models: {
+        [alias: string]: {
+            infer(input: any): Promise<any>;
+            stream?(input: any): AsyncIterable<any>;
+        };
+    };
+
+    // Agent-to-agent calls — aliases come from the deployment topology.
+    agents: {
+        [agentAlias: string]: {
+            [taskAlias: string]: (input: unknown) => Promise<unknown>;
+        };
+    };
+
+    // SQLite cubbies (shared state across agents in the same Agent Service).
+    cubbies: {
+        [alias: string]: {
+            query(instanceId: string, sql: string, params?: unknown[]): Promise<any>;
+            exec(instanceId: string, sql: string, params?: unknown[]): Promise<any>;
+        };
+    };
+
+    // Continuous data streams (packets arrive as Uint8Array).
+    streams: {
+        subscribe(streamId: string): Promise<AsyncIterable<{ payload: Uint8Array; sequenceNum?: number }>>;
+    };
+
+    // Stateful aggregators attached to streams.
+    rafts: {
+        [alias: string]: {
+            query(params: { dataStreamId: string; [k: string]: any }): Promise<{ data: any } | { error: string }>;
+        };
+    };
+
+    // Native image processing (Go-side, ~5ms). Inputs/outputs are Uint8Array.
+    image: {
+        crop(bytes: Uint8Array, box: { xmin: number; ymin: number; xmax: number; ymax: number }, quality?: number):
+            { data: Uint8Array; width: number; height: number } | { error: string };
+        resize(bytes: Uint8Array, width: number, height?: number, quality?: number):
+            { data: Uint8Array; width: number; height: number } | { error: string };
+        info(bytes: Uint8Array): { width: number; height: number; format: string } | { error: string };
+        encode(bytes: Uint8Array, format: 'jpeg' | 'png', quality?: number): Uint8Array | { error: string };
+    };
+
+    // Emit a new event into the Event Runtime (feedback loop).
+    emit(eventType: string, payload: unknown, targetId?: string): void;
+
+    // External HTTP — NOT for inference. Use context.models.<alias>.infer/.stream for models.
+    fetch(url: string, options?: { method?: string; headers?: Record<string, string>; body?: string }):
+        Promise<{ ok: boolean; status: number; json(): Promise<unknown>; text(): Promise<string> }>;
+
+    // Read-only workspace identity.
+    workspace: { id: string; agentServiceId: string };
 }
 ```
+
+### Inference uses `context.models`
+
+See the **inference** skill for the 16-model catalog. Quick reference:
+
+```typescript
+// Non-streaming (every model)
+const result = await context.models.yolo.infer({ image });
+
+// Streaming (LLMs, vision LLMs, whisper, embedding)
+for await (const chunk of context.models.llm.stream({ prompt })) {
+    context.log(chunk.text);
+}
+```
+
+Inputs are the raw JSON-Schema fields of the model's `inputSchema`, not wrapped in `{ input: ... }`.
+
+### Other Context surfaces
+
+- `context.image.crop(bytes, box)` / `.resize(bytes, w, h?)` / `.info(bytes)` / `.encode(bytes, format)` — native image ops on `Uint8Array`. Useful before feeding a crop to `plateOcr`, resizing before a vision model, or converting format.
+- `context.emit(eventType, payload, targetId?)` — emit a new event; enters the standard event pipeline (can trigger other deployments). Fire-and-forget (not a Promise).
+- `context.rafts.<alias>.query({ dataStreamId, ... })` — query a stateful raft; returns `{ data }` or `{ error }`.
+- `context.workspace.id` / `context.workspace.agentServiceId` — workspace identity; read-only.
+- `context.fetch(url, opts)` — proxied HTTP for **external** services (vendor APIs, webhooks). Never for inference.
 
 ## Project Directory Convention
 
@@ -663,8 +747,8 @@ Generate complete, deployable CEF projects from natural language goals. Follow t
 
 1. Every `.ts` handler file must be fully self-contained. NO `import` or `require`.
 2. All helpers, constants, types defined inline in each file. Duplicate across files if needed.
-3. Only external API is `context.*` (cubbies, agents, streams, fetch, log).
-4. Never use `context.models`; all inference via `context.fetch()`.
+3. Only external API is `context.*` (models, agents, cubbies, streams, rafts, image, emit, fetch, log, workspace).
+4. Inference uses `context.models.<alias>.infer(input)` (or `.stream(input)` for streaming models). Never hand-roll HTTP inference via `context.fetch()` — that path is obsolete. `context.fetch()` is only for external HTTP services.
 5. All `file:` paths in config are relative to the config file.
 6. Generate fully working code, not stubs or TODOs.
 7. Follow the directory convention: `engagements/`, `agents/{name-kebab}/tasks/`.
@@ -675,16 +759,19 @@ Generate complete, deployable CEF projects from natural language goals. Follow t
 
 | Capability | Maps To |
 |-|-|
-| Object detection (YOLO) | Agent with inference task |
-| Speech transcription | Agent with Whisper task |
-| Text embedding | Agent with embedding task |
-| Sentiment/emotion analysis | Agent with classification task |
-| LLM reasoning/classification | Agent with LLM inference task |
+| Object detection (YOLO) | Agent task calling `context.models.yolo` / `yoloXL` |
+| Speech transcription | Agent task calling `context.models.whisper` / `whisperTiny` / `whisperLarge` |
+| Text embedding | Agent task calling `context.models.embedding` |
+| Sentiment/emotion analysis | Agent task calling `context.models.sentimentAnalysis` / `emotionClassifier` |
+| LLM reasoning / generation | Agent task calling `context.models.llm` / `mistral7b` / `mistralSmall` / `qwenCoder` |
+| Vision-language reasoning | Agent task calling `context.models.qwenVision` / `llamaVision` |
+| License plate recognition | Agent task chaining `plateDetector` → `context.image.crop` → `plateOcr` |
 | State persistence | Cubby with SQL schema (1:1 with workspace) |
-| Vector search / similarity | Cubby with sqlite-vec |
+| Vector search / similarity | Cubby with `sqlite-vec` |
 | Real-time stream processing | Engagement with stream subscription |
 | Multi-model orchestration | Engagement (concierge) calling multiple agents |
-| External API calls | Agent task using context.fetch() |
+| External API calls | Agent task using `context.fetch()` (third-party only) |
+| Image preprocessing (crop/resize/encode) | `context.image.*` inline (native, ~5ms) |
 
 ## Step 2: Select Patterns
 
@@ -701,20 +788,28 @@ Most deployments combine multiple patterns. Typical: concierge-orchestrator + pi
 
 ## Step 3: Select Models
 
-All models: bucket `1338`, endpoint `https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference`.
+Models are injected into the handler as `context.models.<alias>.infer(input)` (every model) and `.stream(input)` (streaming models only). Pick by alias:
 
-| Capability | Model | Name / Version |
+| Capability | Alias | Stream |
 |-|-|-|
-| Vision-language / chat | Qwen2-VL 7B | `qwen2-vl-7b-instruct` / `v1.0.0` |
-| Text embeddings | Qwen3 Embedding 4B | `qwen3-embedding-4b` / `v1.0.0` |
-| Speech-to-text | Whisper Large V3 | `whisper_large_v3` / `v1.0.4` |
-| Emotion classification | Emotion DistilRoBERTa | `emotion-english-distilroberta-base` / `v1.0.2` |
-| Sentiment polarity | Multilingual Sentiment | `multilingual-sentiment-analysis` / `v1.0.0` |
-| Object detection | YOLO11x 1280 | `yolo11x_1280` / `v1.0.0` |
-| License plate detection | YOLO Plate Detector | `yolo-plate-detector` / `v1.0.1` |
-| Plate text recognition | Fast Plate OCR | `fast-plate-ocr` / `v1.0.0` |
+| Fast general object detection | `yolo` | — |
+| High-accuracy object detection (1280×1280, small objects) | `yoloXL` | — |
+| License plate detection | `plateDetector` | — |
+| License plate OCR (on cropped plate) | `plateOcr` | — |
+| Speech-to-text (small, non-streaming) | `whisperTiny` | — |
+| Speech-to-text (small, streaming) | `whisper` | ✓ |
+| Speech-to-text (large, multilingual, streaming) | `whisperLarge` | ✓ |
+| Tiny LLM for testing | `llm` | ✓ |
+| General LLM (efficient) | `mistral7b` | ✓ |
+| General LLM (long context, 128K) | `mistralSmall` | ✓ |
+| Code-focused LLM | `qwenCoder` | ✓ |
+| Vision-language (7B) | `qwenVision` | ✓ |
+| Vision-language (11B, higher quality) | `llamaVision` | ✓ |
+| Multilingual embeddings (100+ langs, MRL) | `embedding` | ✓ |
+| English emotion classification (7 classes) | `emotionClassifier` | — |
+| Multilingual sentiment polarity (5 classes, 23 langs) | `sentimentAnalysis` | — |
 
-See **inference** skill for full request/response formats.
+See the **inference** skill for per-model input/output schemas, pricing, and handler examples.
 
 ## Step 4: Design the Entity Graph
 
@@ -795,30 +890,32 @@ Use this when each event is self-contained. For continuous data (audio, sensor f
 ### Agent Task (Inference Worker)
 
 ```typescript
-const ENDPOINT = 'https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference';
-
-async function retry(action: () => Promise<any>, retries = 3): Promise<any> {
-    for (let i = 0; i < retries; i++) {
-        try { return await action(); }
-        catch (error) { if (i === retries - 1) throw error; }
-    }
-}
-
 async function handle(event: any, context: any) {
-    const { inputField } = event.payload;
-    const data = await retry(async () => {
-        const response = await context.fetch(ENDPOINT, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: { bucket: 1338, name: 'MODEL_NAME', version: 'v1.0.0' },
-                input: { text: inputField }
-            })
-        });
-        if (!response.ok) throw new Error(`Inference failed: ${response.status}`);
-        return response.json();
-    });
-    return { result: data.output };
+    // Defensive unwrap: engagements-passed args arrive wrapped as event.payload.payload
+    const params = event.payload?.payload ?? event.payload;
+    const { text } = params;
+    if (!text) throw new Error('Missing text');
+
+    const result = await context.models.sentimentAnalysis.infer({ text });
+    return {
+        label: result.label,
+        confidence: result.confidence
+    };
+}
+```
+
+Streaming variant (LLMs, `whisper*`, VLMs, `embedding`):
+
+```typescript
+async function handle(event: any, context: any) {
+    const params = event.payload?.payload ?? event.payload;
+    const { prompt } = params;
+
+    let text = '';
+    for await (const chunk of context.models.llm.stream({ prompt, max_tokens: 500 })) {
+        text += chunk.text ?? '';
+    }
+    return { text };
 }
 ```
 
@@ -1015,7 +1112,8 @@ Before presenting generated output, verify:
 - [ ] Every `.ts` file defines a `handle(event, context)` function
 - [ ] Agent aliases in config match `context.agents.<alias>.<task>()` usage in code
 - [ ] Cubby aliases in config match `context.cubbies.<alias>` usage in handlers
-- [ ] All inference calls use `context.fetch()`, never `context.models`
+- [ ] Inference uses `context.models.<alias>.infer(input)` (or `.stream(input)` for streaming models); no hardcoded inference URLs, buckets, or model versions
+- [ ] `context.fetch()` is used only for external third-party HTTP, never for inference
 - [ ] JSON Schema types are lowercase: `string`, `number`, `boolean`, `array`, `object`
 - [ ] `.env.example` lists all required environment variables
 - [ ] One cubby per workspace; all tables in migrations

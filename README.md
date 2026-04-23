@@ -14,8 +14,8 @@ bunx skills add cef-ai/skills
 |-|-|
 | **clientsdk** | Connect external code to CEF via `@cef-ai/client-sdk`: send events, query cubbies, subscribe to streams |
 | **cli** | Config schema, deploy/delete/clone commands, local dev server (`cef dev`), local automated testing, playground testing, environment variables, naming conventions |
-| **coding** | Handler signature, runtime API (CEFContext), entity hierarchy, V8 constraints, orchestration patterns, topology generation |
-| **inference** | ML model catalog (Qwen2-VL, Qwen3 embeddings, Whisper, emotion, sentiment, YOLO, plate detection, OCR), integration guides, input/output schemas, and handler patterns |
+| **coding** | Handler signature, Context API (`context.models/.agents/.cubbies/.streams/.rafts/.image/.emit/.fetch/.workspace/.log`), entity hierarchy, V8 constraints, orchestration patterns, topology generation |
+| **inference** | `context.models.<alias>.infer/.stream` and the 16-model catalog (yolo, yoloXL, whisper, whisperTiny, whisperLarge, llm, mistral7b, mistralSmall, qwenCoder, qwenVision, llamaVision, embedding, emotionClassifier, sentimentAnalysis, plateDetector, plateOcr) — per-model input/output schemas, streaming usage, and production examples |
 | **storage** | Cubby API (SQLite query/exec, migrations, sqlite-vec), state machine, dedup, SQL patterns |
 
 ## How It Works

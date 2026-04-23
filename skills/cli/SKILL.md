@@ -658,6 +658,7 @@ cef deploy delete --only stream
 
 ## Related Skills
 
-- **coding**: Handler signature, runtime API, entity hierarchy, orchestration patterns, topology generation
-- **inference**: ML model catalog and calling patterns
-- **storage**: Storage API and state management
+- **coding**: Handler signature, Context API (`context.models/.agents/.cubbies/.streams/.rafts/.image/.emit/.fetch/.workspace/.log`), entity hierarchy, orchestration patterns, topology generation
+- **inference**: `context.models.<alias>.infer/.stream` + full 16-model catalog (yolo, yoloXL, whisper*, llm, mistral*, qwenVision, llamaVision, qwenCoder, embedding, emotionClassifier, sentimentAnalysis, plateDetector, plateOcr)
+- **storage**: Cubby API, SQL patterns, `sqlite-vec` vector search
+- **clientsdk**: Sending events/streams from external code into CEF
