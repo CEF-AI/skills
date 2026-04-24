@@ -36,8 +36,8 @@ Each skill owns its domain content exactly once. Other skills cross-reference ra
 |-|-|
 | @cef-ai/client-sdk setup, events, queries, streams, agreements | clientsdk |
 | cef.config.yaml schema, deploy commands, env vars, naming conventions | cli |
-| Handler signature, CEFContext, entity hierarchy, orchestration patterns, topology generation | coding |
-| Model catalog, inference endpoints, request/response formats | inference |
+| Handler signature, Context API (`context.models/.agents/.cubbies/.streams/.rafts/.image/.emit/.fetch/.workspace/.log`), entity hierarchy, orchestration patterns, topology generation | coding |
+| Model catalog (16 models), `context.models.<alias>.infer/.stream`, per-model input/output schemas | inference |
 | Cubby API (query/exec), migrations, sqlite-vec, state patterns | storage |
 
 ## Critical Domain Constraint

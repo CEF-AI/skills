@@ -1,814 +1,626 @@
 ---
 name: cef-inference
-description: Use when calling ML models from a CEF agent handler via context.fetch(). Covers the inference endpoint, model catalog (Qwen2-VL, Qwen3 embeddings, Whisper, emotion, sentiment, YOLO, plate detector, plate OCR), request/response formats, input/output schemas, integration guides, retry patterns, and production-ready handler examples.
+description: Use when calling ML models from a CEF agent handler. Inference goes through `context.models.<alias>.infer(input)` (non-streaming) or `context.models.<alias>.stream(input)` (streaming). Covers the full 16-model registry — yolo, yoloXL, whisper, whisperTiny, whisperLarge, llm, llamaVision, qwenVision, qwenCoder, mistral7b, mistralSmall, embedding, emotionClassifier, sentimentAnalysis, plateDetector, plateOcr — with input/output schemas, handler examples, streaming consumption, and common pipelines.
 ---
 
 # CEF Inference
 
-All model inference in CEF goes through `context.fetch()` to the inference endpoint. Never use `context.models`; it does not exist in production.
-
-> **Reminder:** All handler code must be fully inline. No `import` or `require`. See the **coding** skill.
-
-## Inference Endpoint
-
-All models run on the same endpoint and bucket:
-
-```
-POST https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference
-```
-
-Every request follows the same structure:
+Inference runs through the **Context API**. Each model is exposed on `context.models` by a JS-safe **alias** that the Agent Runtime injects into your V8 isolate from your Agent Service's model registry at execution time. There is no URL to call, no bucket number, no version string — just the alias.
 
 ```typescript
-const response = await context.fetch(
-    'https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference',
-    {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            model: { bucket: 1338, name: MODEL_NAME, version: MODEL_VERSION },
-            input: { ... }
-        })
-    }
-);
-const data = await response.json();
-// data.output   - model-specific output
-// data.metrics  - { totalTimeMs, inferenceTimeMs }
-// data.requestId
+const result = await context.models.yolo.infer({ image: event.payload.image });
+// result: { detections: [...], status: 'success', model: '...' }
 ```
 
-## Retry Wrapper (include in every handler)
+> **Handler code is fully inline.** No `import` / `require` (V8 isolate). See the **coding** skill.
+
+## The two methods
+
+Every model exposes `.infer()`. Streaming-capable models also expose `.stream()`.
 
 ```typescript
-async function retry(action: () => Promise<any>, retries = 3): Promise<any> {
-    for (let i = 0; i < retries; i++) {
-        try { return await action(); }
-        catch (error) { if (i === retries - 1) throw error; }
-    }
+// Non-streaming — returns the full output once the model is done.
+const out = await context.models.<alias>.infer(input);
+
+// Streaming — yields chunks as they arrive (SSE). Only on streaming models.
+for await (const chunk of context.models.<alias>.stream(input)) {
+    // ...
 }
 ```
+
+- `input` is the **raw JSON-Schema fields** of the model's `inputSchema`. **Not** wrapped in `{ input: ... }`. For `yolo` that means `{ image, confidence? }`, not `{ input: { image } }`.
+- `infer()` returns `Promise<Output>` matching the model's `outputSchema`.
+- `stream()` returns an async iterable — consume with `for await`. Each chunk matches the model's streaming `outputSchema`.
+- Timeouts, retries, and routing (GPU node selection, cold-start handling) are handled by the runtime. Do **not** wrap calls in manual retry loops — the Agent Runtime → Orchestrator → Inference Gateway layer already retries transient failures.
+
+## Streaming consumption
+
+Use `for await` to process chunks as they arrive; accumulate if you want the full result at the end.
+
+```typescript
+// Accumulate a full LLM response
+let full = '';
+for await (const chunk of context.models.llm.stream({ prompt: 'Write a haiku about SQLite' })) {
+    full += chunk.text ?? '';
+}
+return { text: full };
+```
+
+```typescript
+// Transcribe audio incrementally and log progress
+for await (const chunk of context.models.whisperLarge.stream({ audio, language: 'en' })) {
+    context.log('Token:', chunk.text);
+}
+```
+
+If you do not need per-chunk processing, prefer `.infer()` — it buffers the full response in one call.
+
+---
 
 ## Model Catalog
 
-All models: bucket `1338`, endpoint `https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference`.
+All aliases are injected into `context.models.<alias>`. `Stream` means `.stream()` is available in addition to `.infer()`.
 
-| Model | Name | Version | Task | Type | Provider | Params | Input |
-|-|-|-|-|-|-|-|-|
-| Qwen2-VL 7B Instruct | `qwen2-vl-7b-instruct` | `v1.0.0` | text-generation | multimodal | Alibaba | 7B | `prompt`, optional `image`, `max_tokens`, `temperature` |
-| Qwen3 Embedding 4B | `qwen3-embedding-4b` | `v1.0.0` | feature-extraction | embedding | Alibaba | 4B | `text` |
-| Whisper Large V3 | `whisper_large_v3` | `v1.0.4` | speech-to-text | audio | OpenAI | 1.5B | `audio` (URL or base64) |
-| Emotion DistilRoBERTa | `emotion-english-distilroberta-base` | `v1.0.2` | text-classification | nlp | Hugging Face | 82M | `text` |
-| Multilingual Sentiment | `multilingual-sentiment-analysis` | `v1.0.0` | text-classification | nlp | Hugging Face | 280M | `text` |
-| YOLO11x 1280 | `yolo11x_1280` | `v1.0.0` | object-detection | cv | Ultralytics | 1280 | `image` (URL or base64) |
-| YOLO Plate Detector | `yolo-plate-detector` | `v1.0.1` | object-detection | cv | Ultralytics | YOLO | `image` (URL or base64) |
-| Fast Plate OCR | `fast-plate-ocr` | `v1.0.0` | image-to-text | cv | Custom | OCR | `image` (URL or base64) |
+| Alias | Underlying model | Version | Task | Stream | Pricing |
+|---|---|---|---|---|---|
+| `yolo` | yolo11n_ensemble | v1.0.2 | object-detection | — | $0.00112 / image |
+| `yoloXL` | yolo11x_1280 | v1.0.0 | object-detection | — | $0.0056 / image |
+| `plateDetector` | yolo_plate_detector | v1.0.1 | object-detection | — | $0.002 / image |
+| `plateOcr` | fast_plate_ocr | v1.0.0 | image-classification | — | $0.001 / image |
+| `whisperTiny` | whisper-tiny | v1.0.0 | speech-to-text | — | $0.0000015 in / $0.000006 out per token |
+| `whisper` | whisper_tiny | v1.0.0 | speech-to-text | ✓ | $0.0000015 in / $0.000006 out per token |
+| `whisperLarge` | whisper_large_v3 | v1.0.5 | speech-to-text | ✓ | $0.000005 in / $0.00002 out per token |
+| `llm` | smollm_135m | v1.0.0 | text-generation | ✓ | $0.00001 in / $0.00005 out per token |
+| `qwenVision` | qwen2-vl-7b-instruct | v1.0.2 | text-generation (VLM) | ✓ | $0.00003 in / $0.00012 out per token |
+| `llamaVision` | llama-3.2-11b-vision-instruct | v1.0.0 | text-generation (VLM) | ✓ | $0.00004 in / $0.00016 out per token |
+| `mistral7b` | mistral-7b-instruct | v0.3.0 | text-generation | ✓ | $0.00003 in / $0.00012 out per token |
+| `mistralSmall` | mistral-small-3.1-24b | v1.0.0 | text-generation | ✓ | $0.00008 in / $0.00032 out per token |
+| `qwenCoder` | qwen3-coder-next | v1.0.0 | text-generation (code) | ✓ | $0.00005 in / $0.0002 out per token |
+| `embedding` | qwen3-embedding-4b | v1.0.0 | feature-extraction | ✓ | $0.00002 / token |
+| `emotionClassifier` | emotion-english-distilroberta-base | v1.0.2 | text-classification | — | $0.0005 / call |
+| `sentimentAnalysis` | multilingual-sentiment-analysis | v1.0.0 | text-classification | — | $0.0005 / call |
 
 ---
 
-### Qwen2-VL 7B Instruct (Vision-Language / Chat)
+## Per-model reference
 
-Multimodal model for image understanding, visual Q&A, and text-only chat. Supports streaming.
+### `yolo` — General object detection (fast)
 
-- **Capabilities:** vision, chat, streaming
-- **License:** Custom (commercial use allowed)
-- **Use cases:** Visual question answering (describe images, answer questions about photos), image captioning and alt-text generation, multimodal chat (text-only or text + image), document understanding (forms, charts, diagrams), multilingual vision (English, Chinese, and 10+ languages)
+YOLO11 Nano ensemble — fast, low-cost default for COCO-class object detection.
 
-**Input schema:**
+**Input** — `{ image: string; confidence?: number; iou?: number }`
+- `image` (required): URL or base64-encoded image
+- `confidence` (default `0.25`): minimum detection confidence (0-1)
+- `iou` (default `0.45`): IoU threshold for non-maximum suppression (0-1)
 
-| Parameter | Type | Required | Default | Description |
-|-|-|-|-|-|
-| prompt | string | Yes | - | User prompt or question |
-| image | string | No | - | Image URL or base64 data |
-| max_tokens | number | No | 2048 | Max tokens to generate |
-| temperature | number | No | 0.8 | Sampling temperature |
-
-**Output schema:** `{ response: string }`
-
-**Handler usage:**
+**Output** — `{ detections: Array<{ label: string; confidence: number; box: { xmin, ymin, xmax, ymax } }>; model: string; status: 'success' | 'error' }`
 
 ```typescript
-// Text-only chat
-const request = {
-    model: { bucket: 1338, name: 'qwen2-vl-7b-instruct', version: 'v1.0.0' },
-    input: { prompt: 'What is the capital of France?', max_tokens: 2048, temperature: 0.8 }
-};
-
-// Vision: prompt + image
-const request = {
-    model: { bucket: 1338, name: 'qwen2-vl-7b-instruct', version: 'v1.0.0' },
-    input: {
-        prompt: 'Describe this image.',
-        image: 'https://example.com/photo.png',  // URL or base64
-        max_tokens: 2048,
-        temperature: 0.8
-    }
-};
-```
-
-**Response:**
-
-```json
-{
-  "output": { "text": "Paris is the capital of France." },
-  "metrics": { "totalTimeMs": 239, "inferenceTimeMs": 239 },
-  "requestId": "abc123"
+async function handle(event: any, context: any) {
+    const result = await context.models.yolo.infer({
+        image: event.payload.image,
+        confidence: 0.3
+    });
+    return { count: result.detections.length, detections: result.detections };
 }
 ```
 
-**cURL example:**
-
-```bash
-curl -X POST "https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference" \
-  -H "Content-Type: application/json" \
-  -d '{"model":{"bucket":1338,"name":"qwen2-vl-7b-instruct","version":"v1.0.0"},"input":{"prompt":"What is the capital of France?","max_tokens":256,"temperature":0.7}}'
-```
-
-**JavaScript example (standalone):**
-
-```javascript
-const body = {
-  model: { bucket: 1338, name: 'qwen2-vl-7b-instruct', version: 'v1.0.0' },
-  input: { prompt: 'Describe this image.', image: 'https://example.com/photo.png', max_tokens: 2048, temperature: 0.8 }
-};
-const res = await fetch('https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference', {
-  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
-});
-const data = await res.json();
-console.log(data.output);
-```
-
-**Example requests:**
-
-- **Chat** (text-only): `{ prompt: 'What is the capital of France?', max_tokens: 2048, temperature: 0.8 }`
-- **Vision** (prompt + image): `{ prompt: 'Describe this image.', image: 'https://example.com/image.png', max_tokens: 2048, temperature: 0.8 }`
-
 ---
 
-### Qwen3 Embedding 4B (Text Embeddings)
+### `yoloXL` — High-accuracy object detection at 1280×1280
 
-Instruction-aware embeddings. Supports 100+ languages.
+YOLO11 Extra Large at 1280×1280. Best for aerial/drone imagery and small-object cases. ~5× more expensive than `yolo` but much higher recall on small objects.
 
-- **Capabilities:** embedding
-- **License:** Custom (commercial use allowed)
-- **Use cases:** Semantic search (query and document embeddings), RAG and retrieval-augmented generation, document clustering and similarity, multilingual embedding (100+ languages), instruction-aware embeddings for task-specific retrieval
+**Input** — `{ image: string }` (URL or base64)
 
-**Input schema:** `{ text: string }` (required)
+**Output** — `{ count: number; detections: Array<{ label: string; class_id: number; confidence: number; box: { xmin, ymin, xmax, ymax } }>; input_size: [number, number]; status: 'success' | 'error' }`
 
-**Output schema:** `{ embedding: number[] }`
-
-**Handler usage:**
+> **Coordinate space:** `box` coordinates are in the **model input space (1280×1280 letterboxed)**, not the original image. Use `input_size` to rescale back to the source image dimensions.
 
 ```typescript
-const request = {
-    model: { bucket: 1338, name: 'qwen3-embedding-4b', version: 'v1.0.0' },
-    input: { text: 'What is machine learning?' }
-};
-// output.embedding = [0.012, -0.034, 0.056, ...]
-```
+async function handle(event: any, context: any) {
+    const result = await context.models.yoloXL.infer({ image: event.payload.image });
 
-Post-processing: L2-normalize for cosine similarity search.
-
-**Response:**
-
-```json
-{
-  "output": { "embedding": [0.012, -0.034, 0.056, "..."] },
-  "metrics": { "totalTimeMs": 150, "inferenceTimeMs": 150 },
-  "requestId": "abc123"
+    // Rescale boxes from 1280×1280 letterboxed space back to source coords if you know the source size.
+    const [modelW, modelH] = result.input_size;
+    context.log(`Detected ${result.count} objects in ${modelW}×${modelH} space`);
+    return result;
 }
 ```
 
-**cURL example:**
-
-```bash
-curl -X POST "https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference" \
-  -H "Content-Type: application/json" \
-  -d '{"model":{"bucket":1338,"name":"qwen3-embedding-4b","version":"v1.0.0"},"input":{"text":"What is machine learning?"}}'
-```
-
-**JavaScript example (standalone):**
-
-```javascript
-const body = {
-  model: { bucket: 1338, name: 'qwen3-embedding-4b', version: 'v1.0.0' },
-  input: { text: 'What is machine learning?' }
-};
-const res = await fetch('https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference', {
-  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
-});
-const data = await res.json();
-console.log(data.output);
-```
-
-**Example requests:**
-
-- **Single text:** `{ text: 'What is machine learning?' }`
-- **Query:** `{ text: 'How does neural network training work?' }`
-
 ---
 
-### Whisper Large V3 (Speech-to-Text)
+### `plateDetector` — License plate detection
 
-Multilingual transcription with timestamps.
+YOLOv9-S trained on global license plate data (Precision 0.957, Recall 0.917, mAP50 0.966). Use before `plateOcr`.
 
-- **Capabilities:** transcription, multilingual
-- **License:** MIT (commercial use allowed)
-- **Use cases:** Meeting and call transcription, subtitles and captions for video, voice memos to text, multilingual speech recognition, accessibility (audio to text)
+**Input** — `{ image: string }`
 
-**Input schema:** `{ audio: string }` (required; URL or base64-encoded audio, WAV/MP3)
-
-**Output schema:** `{ text: string, chunks: Array<{ text: string, timestamp: number[] }> }`
-
-**Handler usage:**
+**Output** — `{ count: number; detections: Array<{ label: string; confidence: number; box: { xmin, ymin, xmax, ymax } }>; input_size: [number, number] }`
 
 ```typescript
-const request = {
-    model: { bucket: 1338, name: 'whisper_large_v3', version: 'v1.0.4' },
-    input: { audio: 'https://example.com/recording.mp3' }  // URL or base64
-};
-```
-
-**Response:**
-
-```json
-{
-  "output": {
-    "text": "Hello, this is the transcribed text.",
-    "chunks": [
-      { "text": "Hello, ", "timestamp": [0.0, 0.5] },
-      { "text": "this is the transcribed text.", "timestamp": [0.5, 2.0] }
-    ]
-  },
-  "metrics": { "totalTimeMs": 3200, "inferenceTimeMs": 3100 },
-  "requestId": "abc123"
+const det = await context.models.plateDetector.infer({ image: event.payload.image });
+for (const plate of det.detections) {
+    context.log('Plate box:', plate.box, 'confidence:', plate.confidence);
 }
 ```
 
-**cURL example:**
+---
 
-```bash
-curl -X POST "https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference" \
-  -H "Content-Type: application/json" \
-  -d '{"model":{"bucket":1338,"name":"whisper_large_v3","version":"v1.0.4"},"input":{"audio":"https://cdn.ddc-dragon.com/920/baear4ic7ocixnmtib2z5oqmgth7qofbrun6pb6rocutlrzzisfsvu6xis4/en.mp3"}}'
+### `plateOcr` — Plate text recognition
+
+Fast CCT-S-ReLU OCR model. Trained on 220k+ plates from 65+ countries. Expects a **cropped** plate image (run `plateDetector` + `context.image.crop` first).
+
+**Input** — `{ image: string }` (cropped plate image as URL or base64)
+
+**Output** — `{ plate: string; avg_confidence: number; confidence: number[] }`
+
+```typescript
+const ocr = await context.models.plateOcr.infer({ image: croppedPlateBase64 });
+return { text: ocr.plate, confidence: ocr.avg_confidence };
 ```
-
-**JavaScript example (standalone):**
-
-```javascript
-const body = {
-  model: { bucket: 1338, name: 'whisper_large_v3', version: 'v1.0.4' },
-  input: { audio: 'https://example.com/recording.mp3' }
-};
-const res = await fetch('https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference', {
-  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
-});
-const data = await res.json();
-console.log(data.output.text);
-```
-
-**Example requests:**
-
-- **From URL:** `{ audio: 'https://cdn.ddc-dragon.com/920/baear4ic7ocixnmtib2z5oqmgth7qofbrun6pb6rocutlrzzisfsvu6xis4/en.mp3?source=developer-console' }`
-- **From base64:** `{ audio: 'base64_or_url_here' }`
 
 ---
 
-### Emotion DistilRoBERTa (Emotion Classification)
+### `whisperTiny` — Speech-to-text (small, non-streaming)
 
-Labels: anger, disgust, fear, joy, neutral, sadness, surprise.
+Whisper Tiny. Smallest + cheapest ASR option for short audio.
 
-- **Capabilities:** classification
-- **License:** Apache-2.0 (commercial use allowed)
-- **Use cases:** Customer support emotion detection, content moderation (anger, fear), social listening and brand sentiment, chatbot response tuning, mental health and wellness apps
+**Input** — `{ audio: string }` (URL or base64-encoded audio; WAV/MP3)
 
-**Input schema:** `{ text: string }` (required)
-
-**Output schema:** `{ label: string, confidence: number, scores: Record<string, number> }`
-
-**Handler usage:**
+**Output** — `{ text: string; language: string; status: string }`
 
 ```typescript
-const request = {
-    model: { bucket: 1338, name: 'emotion-english-distilroberta-base', version: 'v1.0.2' },
-    input: { text: 'I am so happy today!' }
-};
+const r = await context.models.whisperTiny.infer({ audio: event.payload.audioUrl });
+return { transcript: r.text, language: r.language };
 ```
 
-**Response:**
+---
 
-```json
-{
-  "output": {
-    "label": "joy",
-    "confidence": 0.96,
-    "scores": { "anger": 0.0015, "disgust": 0.0004, "fear": 0.0004, "joy": 0.9616, "neutral": 0.003, "sadness": 0.0055, "surprise": 0.0276 }
-  },
-  "metrics": { "totalTimeMs": 85, "inferenceTimeMs": 85 },
-  "requestId": "abc123"
+### `whisper` — Speech-to-text (streaming tiny)
+
+Streaming variant of Whisper Tiny. Same model as `whisperTiny` but delivers tokens incrementally via `.stream()`.
+
+**Input** — `{ audio: string }`
+
+**Output per chunk** — `{ text: string }`
+
+```typescript
+let transcript = '';
+for await (const chunk of context.models.whisper.stream({ audio: event.payload.audioUrl })) {
+    transcript += chunk.text ?? '';
+    context.log('partial:', transcript);
+}
+return { transcript };
+```
+
+---
+
+### `whisperLarge` — Speech-to-text (high accuracy, multilingual, streaming)
+
+Whisper Large V3. Supports language hints, context prompts, timestamps, and transcribe-vs-translate modes.
+
+**Input:**
+- `audio` (required): URL or base64
+- `language` (optional): ISO 639-1 code — set to the source language to keep original (`'en'`, `'fr'`, `'zh'`, etc.). Default `'en'`.
+- `prompt` (optional): context hint (proper nouns, domain terms) to improve recognition
+- `return_timestamps` (optional, non-streaming only): word-level timestamps
+- `task` (optional): `'transcribe'` (keep source language) or `'translate'` (→ English)
+
+**Output** — `{ text: string; chunks?: Array<{ text: string; timestamp: number[] }> }`
+
+```typescript
+// Non-streaming with timestamps
+const full = await context.models.whisperLarge.infer({
+    audio: event.payload.audioUrl,
+    language: 'en',
+    return_timestamps: true,
+    prompt: 'CEF, DDC, cubby, raft'
+});
+
+// Streaming (no timestamps — request per-token text)
+let partial = '';
+for await (const chunk of context.models.whisperLarge.stream({
+    audio: event.payload.audioUrl,
+    language: 'es',
+    task: 'translate'
+})) {
+    partial += chunk.text ?? '';
 }
 ```
 
-**cURL example:**
+---
 
-```bash
-curl -X POST "https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference" \
-  -H "Content-Type: application/json" \
-  -d '{"model":{"bucket":1338,"name":"emotion-english-distilroberta-base","version":"v1.0.2"},"input":{"text":"I am so happy today!"}}'
+### `llm` — SmolLM 135M (tiny streaming LLM for testing)
+
+SmolLM 135M Instruct. Very small + cheap LLM — ideal for dev, tests, and simple classification/rewrites. Not for high-quality generation.
+
+**Input** — `{ prompt: string }`
+
+**Output per chunk (stream)** — `{ text: string }` · **Output (infer)** — `{ text: string }`
+
+```typescript
+// Non-streaming
+const { text } = await context.models.llm.infer({ prompt: 'Summarize: ' + event.payload.article });
+
+// Streaming
+let out = '';
+for await (const chunk of context.models.llm.stream({ prompt: event.payload.prompt })) {
+    out += chunk.text ?? '';
+}
 ```
-
-**JavaScript example (standalone):**
-
-```javascript
-const body = {
-  model: { bucket: 1338, name: 'emotion-english-distilroberta-base', version: 'v1.0.2' },
-  input: { text: 'I am so happy today!' }
-};
-const res = await fetch('https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference', {
-  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
-});
-const data = await res.json();
-console.log(data.output.label, data.output.confidence);
-```
-
-**Example requests:**
-
-- **Joy:** `{ text: 'I am so happy today!' }`
-- **Sadness:** `{ text: 'I lost my keys and now I am late.' }`
-- **Neutral:** `{ text: 'The meeting is at 3 PM.' }`
 
 ---
 
-### Multilingual Sentiment Analysis (Sentiment Polarity)
+### `qwenVision` — Qwen2-VL 7B Instruct (vision-language, streaming)
 
-Labels: Very Negative, Negative, Neutral, Positive, Very Positive. Supports 16+ languages.
+Multimodal VLM: describe images, answer questions about images, or pure text chat.
 
-- **Capabilities:** sentiment
-- **License:** Apache-2.0 (commercial use allowed)
-- **Use cases:** Product and review sentiment, social media and brand listening, customer feedback analysis, multilingual content moderation (16+ languages), survey and NPS analysis
+**Input:**
+- `prompt` (required): user instruction / question
+- `image` (optional): URL, base64, or data URL — omit for text-only chat
+- `max_tokens` (optional, default 256)
+- `temperature` (optional, default 0.7)
+- `stop` (optional): `string[]` of stop sequences
 
-**Input schema:** `{ text: string }` (required)
-
-**Output schema:** `{ label: string, confidence: number, scores: Record<string, number> }`
-
-**Handler usage:**
+**Output** — `{ text: string }` (same for `.infer()` and each `.stream()` chunk)
 
 ```typescript
-const SENTIMENT_LABEL_MAP: Record<string, number> = {
+// Visual Q&A
+const { text } = await context.models.qwenVision.infer({
+    prompt: 'What color is the car and is the driver wearing a seatbelt?',
+    image: event.payload.imageUrl,
+    max_tokens: 200
+});
+
+// Streamed chat
+let reply = '';
+for await (const chunk of context.models.qwenVision.stream({
+    prompt: 'Tell me a short story about a robot.',
+    temperature: 0.9,
+    max_tokens: 300
+})) {
+    reply += chunk.text ?? '';
+}
+```
+
+---
+
+### `llamaVision` — Llama 3.2 11B Vision Instruct (streaming)
+
+Larger vision-language model. Higher quality than `qwenVision` on many benchmarks, but more expensive.
+
+**Input** — `{ prompt: string; image?: string; max_tokens?: number; temperature?: number; stop?: string[] }`
+
+**Output** — `{ text: string }`
+
+```typescript
+const { text } = await context.models.llamaVision.infer({
+    prompt: 'List the visible brands in this photo as a JSON array.',
+    image: event.payload.imageUrl,
+    max_tokens: 512,
+    temperature: 0.2
+});
+```
+
+---
+
+### `mistral7b` — Mistral 7B Instruct v0.3 (streaming)
+
+Efficient general-purpose instruction-tuned LLM. Apache 2.0. Good cost/quality baseline.
+
+**Input** — `{ prompt: string; max_tokens?: number; temperature?: number }`
+
+**Output** — `{ text: string }`
+
+```typescript
+let answer = '';
+for await (const chunk of context.models.mistral7b.stream({
+    prompt: event.payload.question,
+    max_tokens: 800,
+    temperature: 0.3
+})) {
+    answer += chunk.text ?? '';
+}
+```
+
+---
+
+### `mistralSmall` — Mistral Small 3.1 24B Instruct (streaming, 128K context)
+
+Larger Mistral with 128K context. Use when the prompt is long (long document QA, big logs, multi-turn transcripts).
+
+**Input** — `{ prompt: string; max_tokens?: number; temperature?: number }`
+
+**Output** — `{ text: string }`
+
+```typescript
+const { text } = await context.models.mistralSmall.infer({
+    prompt: longDocument + '\n\nQuestion: ' + event.payload.question,
+    max_tokens: 1024,
+    temperature: 0.2
+});
+```
+
+---
+
+### `qwenCoder` — Qwen3-Coder-Next (80B MoE, 256K context, streaming)
+
+Coding-focused agent model. Use for code generation, refactoring, and code-aware reasoning.
+
+**Input** — `{ prompt: string; max_tokens?: number; temperature?: number }`
+
+**Output** — `{ text: string }`
+
+```typescript
+const { text } = await context.models.qwenCoder.infer({
+    prompt: 'Convert this SQL to TypeScript:\n' + event.payload.sql,
+    max_tokens: 1500,
+    temperature: 0.1
+});
+```
+
+---
+
+### `embedding` — Qwen3 Embedding 4B (multilingual, 100+ languages)
+
+2560-dim multilingual embeddings with MRL (Matryoshka) support — you can request smaller dims if you want to cut storage. Supports optional task instructions for instruction-aware retrieval.
+
+**Input:**
+- `text` (required): text to embed
+- `dimensions` (optional, 32–2560): output dimension for MRL; default 2560
+- `instruction` (optional): task instruction for instruction-aware retrieval (e.g., `"Given a question, retrieve passages that answer it"`)
+
+**Output** — `{ embedding: number[]; dimensions: number }`
+
+Prefer `.infer()` for embeddings (single vector — nothing to stream incrementally).
+
+```typescript
+const { embedding } = await context.models.embedding.infer({
+    text: event.payload.query,
+    dimensions: 768,
+    instruction: 'Given a search query, retrieve relevant passages'
+});
+
+// L2-normalize for cosine similarity search (see Utilities section)
+const normalized = l2Normalize(embedding);
+```
+
+---
+
+### `emotionClassifier` — 7-class English emotion
+
+Labels: `anger`, `disgust`, `fear`, `joy`, `neutral`, `sadness`, `surprise`. English only.
+
+**Input** — `{ text: string }`
+
+**Output** — `{ label: string; confidence: number; scores: Record<string, number> }`
+
+```typescript
+const r = await context.models.emotionClassifier.infer({ text: event.payload.message });
+context.log(`Emotion: ${r.label} (${r.confidence.toFixed(2)})`);
+```
+
+---
+
+### `sentimentAnalysis` — 5-class multilingual sentiment
+
+23 languages. Labels: `Very Negative`, `Negative`, `Neutral`, `Positive`, `Very Positive`.
+
+**Input** — `{ text: string }`
+
+**Output** — `{ label: 'Very Negative' | 'Negative' | 'Neutral' | 'Positive' | 'Very Positive'; confidence: number; scores: Record<string, number> }`
+
+```typescript
+const SENTIMENT_SCORE: Record<string, number> = {
     'Very Negative': -1, 'Negative': -0.5, 'Neutral': 0, 'Positive': 0.5, 'Very Positive': 1
 };
 
-const request = {
-    model: { bucket: 1338, name: 'multilingual-sentiment-analysis', version: 'v1.0.0' },
-    input: { text: 'I love this product!' }
-};
-// SENTIMENT_LABEL_MAP[output.label] -> 0.5
+const r = await context.models.sentimentAnalysis.infer({ text: event.payload.review });
+return { score: SENTIMENT_SCORE[r.label] ?? 0, label: r.label, confidence: r.confidence };
 ```
-
-**Response:**
-
-```json
-{
-  "output": {
-    "label": "Positive",
-    "confidence": 0.52,
-    "scores": { "Very Negative": 0.016, "Negative": 0.021, "Neutral": 0.044, "Positive": 0.518, "Very Positive": 0.401 }
-  },
-  "metrics": { "totalTimeMs": 90, "inferenceTimeMs": 90 },
-  "requestId": "abc123"
-}
-```
-
-**cURL example:**
-
-```bash
-curl -X POST "https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference" \
-  -H "Content-Type: application/json" \
-  -d '{"model":{"bucket":1338,"name":"multilingual-sentiment-analysis","version":"v1.0.0"},"input":{"text":"I love this product!"}}'
-```
-
-**JavaScript example (standalone):**
-
-```javascript
-const body = {
-  model: { bucket: 1338, name: 'multilingual-sentiment-analysis', version: 'v1.0.0' },
-  input: { text: 'I love this product!' }
-};
-const res = await fetch('https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference', {
-  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
-});
-const data = await res.json();
-console.log(data.output.label, data.output.confidence);
-```
-
-**Example requests:**
-
-- **Positive:** `{ text: 'I love this product!' }`
-- **Negative:** `{ text: 'This is the worst experience ever.' }`
-- **Neutral:** `{ text: 'The package arrived on Tuesday.' }`
-
----
-
-### YOLO11x 1280 (Object Detection)
-
-General object detection (COCO classes).
-
-- **Capabilities:** object-detection
-- **License:** AGPL-3.0 (commercial use allowed)
-- **Use cases:** General object detection (COCO classes), inventory and counting, surveillance and security, retail and shelf analytics, industrial quality inspection
-
-**Input schema:** `{ image: string }` (required; URL or base64)
-
-**Output schema:** `{ detections: Array<{ label: string, score: number, box: { xmin, ymin, xmax, ymax } }> }`
-
-**Handler usage:**
-
-```typescript
-const request = {
-    model: { bucket: 1338, name: 'yolo11x_1280', version: 'v1.0.0' },
-    input: { image: base64ImageData }  // URL or base64
-};
-```
-
-**Response:**
-
-```json
-{
-  "output": [
-    { "label": "person", "score": 0.95, "box": { "xmin": 10, "ymin": 20, "xmax": 100, "ymax": 200 } }
-  ],
-  "metrics": { "totalTimeMs": 420, "inferenceTimeMs": 400 },
-  "requestId": "abc123"
-}
-```
-
-**cURL example:**
-
-```bash
-curl -X POST "https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference" \
-  -H "Content-Type: application/json" \
-  -d '{"model":{"bucket":1338,"name":"yolo11x_1280","version":"v1.0.0"},"input":{"image":"https://example.com/photo.jpg"}}'
-```
-
-**JavaScript example (standalone):**
-
-```javascript
-const body = {
-  model: { bucket: 1338, name: 'yolo11x_1280', version: 'v1.0.0' },
-  input: { image: 'https://example.com/photo.jpg' }
-};
-const res = await fetch('https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference', {
-  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
-});
-const data = await res.json();
-console.log(data.output);
-```
-
-**Example requests:**
-
-- **Detect objects:** `{ image: 'https://cdn.ddc-dragon.com/1337/baear4ierto64hekv7swg2vag6mykpaztxxg26zlomhidfqr4cowe72apoq/353_3076e922-b656-40c0-9e56-78dae7e43556.jpg' }`
-
----
-
-### YOLO Plate Detector (License Plate Detection)
-
-Detects license plates in images. Outputs bounding boxes and optionally a `plate_image` (cropped base64) for piping to OCR.
-
-- **Capabilities:** object-detection, license-plate
-- **License:** Custom (commercial use allowed)
-- **Use cases:** License plate detection (bounding boxes), ANPR and toll gate systems, parking and access control, fleet and vehicle tracking, traffic and law enforcement
-
-**Input schema:** `{ image: string }` (required; URL or base64)
-
-**Output schema:** `{ detections: Array<{ label: string, score: number, box: object }> }`
-
-**Handler usage:**
-
-```typescript
-const request = {
-    model: { bucket: 1338, name: 'yolo-plate-detector', version: 'v1.0.1' },
-    input: { image: 'https://example.com/car.jpg' }
-};
-```
-
-**Response:**
-
-May include `detections` and optionally `plate_image` (cropped plate as base64) for piping to OCR.
-
-```json
-{
-  "output": {
-    "detections": [
-      { "label": "plate", "score": 0.9, "box": { "xmin": 50, "ymin": 100, "xmax": 200, "ymax": 140 } }
-    ],
-    "plate_image": "base64..."
-  },
-  "metrics": { "totalTimeMs": 310, "inferenceTimeMs": 290 },
-  "requestId": "abc123"
-}
-```
-
-**cURL example:**
-
-```bash
-curl -X POST "https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference" \
-  -H "Content-Type: application/json" \
-  -d '{"model":{"bucket":1338,"name":"yolo-plate-detector","version":"v1.0.1"},"input":{"image":"https://example.com/car.jpg"}}'
-```
-
-**JavaScript example (standalone):**
-
-```javascript
-const body = {
-  model: { bucket: 1338, name: 'yolo-plate-detector', version: 'v1.0.1' },
-  input: { image: 'https://example.com/car.jpg' }
-};
-const res = await fetch('https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference', {
-  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
-});
-const data = await res.json();
-console.log(data.output);
-```
-
-**Example requests:**
-
-- **Detect plate:** `{ image: 'https://cdn.ddc-dragon.com/1337/baear4ierto64hekv7swg2vag6mykpaztxxg26zlomhidfqr4cowe72apoq/353_3076e922-b656-40c0-9e56-78dae7e43556.jpg' }`
-
----
-
-### Fast Plate OCR (License Plate Text Recognition)
-
-Reads text from license plate images. Best used after `yolo-plate-detector` crop.
-
-- **Capabilities:** ocr, license-plate
-- **License:** Custom (commercial use allowed)
-- **Use cases:** License plate text recognition (ANPR), toll and parking payment systems, fleet and vehicle identification, access control and gated communities, pipeline: use after yolo-plate-detector crop
-
-**Input schema:** `{ image: string }` (required; URL or base64)
-
-**Output schema:** `{ plate: string, avg_confidence: number }`
-
-**Handler usage:**
-
-```typescript
-const request = {
-    model: { bucket: 1338, name: 'fast-plate-ocr', version: 'v1.0.0' },
-    input: { image: 'https://example.com/plate-crop.jpg' }
-};
-```
-
-**Response:**
-
-```json
-{
-  "output": {
-    "plate": "AB12 CDE",
-    "avg_confidence": 0.96
-  },
-  "metrics": { "totalTimeMs": 180, "inferenceTimeMs": 160 },
-  "requestId": "abc123"
-}
-```
-
-**cURL example:**
-
-```bash
-curl -X POST "https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference" \
-  -H "Content-Type: application/json" \
-  -d '{"model":{"bucket":1338,"name":"fast-plate-ocr","version":"v1.0.0"},"input":{"image":"https://example.com/plate.jpg"}}'
-```
-
-**JavaScript example (standalone):**
-
-```javascript
-const body = {
-  model: { bucket: 1338, name: 'fast-plate-ocr', version: 'v1.0.0' },
-  input: { image: 'https://example.com/plate.jpg' }
-};
-const res = await fetch('https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference', {
-  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
-});
-const data = await res.json();
-console.log(data.output.plate, data.output.avg_confidence);
-```
-
-**Example requests:**
-
-- **Read plate:** `{ image: 'https://cdn.ddc-dragon.com/1337/baear4ierto64hekv7swg2vag6mykpaztxxg26zlomhidfqr4cowe72apoq/353_3076e922-b656-40c0-9e56-78dae7e43556.jpg' }`
 
 ---
 
 ## Common Pipelines
 
-### Plate Detection + OCR
+### Plate detection → crop → OCR
+
+Combines `plateDetector`, `context.image.crop`, and `plateOcr`. `context.image.*` is a native binding — see the **coding** skill.
 
 ```typescript
-// Step 1: Detect plate
-const detection = await retry(async () => {
-    const res = await ctx.fetch(ENDPOINT, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            model: { bucket: 1338, name: 'yolo-plate-detector', version: 'v1.0.1' },
-            input: { image }
-        })
-    });
-    if (!res.ok) throw new Error(`Plate detection failed: ${res.status}`);
-    return res.json();
-});
+async function handle(event: any, context: any) {
+    const { imageBytes } = event.payload;  // Uint8Array of the source image
 
-if (detection.output.plate_image) {
-    // Step 2: OCR the cropped plate
-    const ocr = await retry(async () => {
-        const res = await ctx.fetch(ENDPOINT, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: { bucket: 1338, name: 'fast-plate-ocr', version: 'v1.0.0' },
-                input: { image: detection.output.plate_image }
-            })
-        });
-        if (!res.ok) throw new Error(`OCR failed: ${res.status}`);
-        return res.json();
-    });
-    return { plate: ocr.output.plate, confidence: ocr.output.avg_confidence };
+    const det = await context.models.plateDetector.infer({ image: event.payload.imageUrl });
+    if (det.count === 0) return { plates: [] };
+
+    const plates: Array<{ text: string; confidence: number }> = [];
+    for (const plate of det.detections) {
+        const crop = context.image.crop(imageBytes, plate.box);
+        if ('error' in crop) { context.log('Crop failed:', crop.error); continue; }
+
+        // context.image.encode → Uint8Array; convert to base64 for model input
+        const base64 = bytesToBase64(crop.data);
+        const ocr = await context.models.plateOcr.infer({ image: base64 });
+        plates.push({ text: ocr.plate, confidence: ocr.avg_confidence });
+    }
+    return { plates };
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+    let bin = '';
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin);
 }
 ```
 
-### Vision Q&A + Sentiment
+### Vision Q&A + sentiment
 
 ```typescript
-const [visionResult, sentimentResult] = await Promise.all([
-    callModel('qwen2-vl-7b-instruct', 'v1.0.0',
-        { prompt: 'Describe what is happening.', image, max_tokens: 512 }, ctx),
-    callModel('multilingual-sentiment-analysis', 'v1.0.0',
-        { text: userComment }, ctx)
+const [vision, sentiment] = await Promise.all([
+    context.models.qwenVision.infer({ prompt: 'Describe the mood of this scene.', image, max_tokens: 200 }),
+    context.models.sentimentAnalysis.infer({ text: event.payload.comment })
 ]);
+return { description: vision.text, reviewerSentiment: sentiment.label };
 ```
 
-## Common Utilities (inline in every handler)
+### Streaming transcription → summarization
 
-### L2 Normalization
+```typescript
+// 1. Transcribe streamed audio
+let transcript = '';
+for await (const chunk of context.models.whisperLarge.stream({
+    audio: event.payload.audioUrl,
+    language: 'en'
+})) {
+    transcript += chunk.text ?? '';
+}
+
+// 2. Summarize the full transcript
+const { text: summary } = await context.models.mistralSmall.infer({
+    prompt: `Summarize this meeting in 5 bullet points:\n\n${transcript}`,
+    max_tokens: 400,
+    temperature: 0.3
+});
+
+return { transcript, summary };
+```
+
+### Semantic search with embeddings
+
+```typescript
+// Query embedding (small dimensions = smaller cubby rows, faster sqlite-vec)
+const { embedding: queryVec } = await context.models.embedding.infer({
+    text: event.payload.query,
+    dimensions: 768
+});
+
+// Search cubby via sqlite-vec (see **storage** skill)
+const rows = await context.cubbies.docs.query('default',
+    `SELECT id, distance FROM docs_vec WHERE embedding MATCH ? ORDER BY distance LIMIT 5`,
+    [new Float32Array(l2Normalize(queryVec)).buffer]
+);
+return rows;
+```
+
+---
+
+## Utilities (inline per handler)
+
+### L2 normalize
 
 ```typescript
 function l2Normalize(vector: number[]): number[] {
-    const norm = Math.sqrt(vector.reduce((sum, val) => sum + val * val, 0));
-    return norm === 0 ? vector.slice() : vector.map(val => val / norm);
+    const norm = Math.sqrt(vector.reduce((s, v) => s + v * v, 0));
+    return norm === 0 ? vector.slice() : vector.map(v => v / norm);
 }
 ```
 
-### Cosine Similarity
+### Cosine similarity
 
 ```typescript
 function cosineSimilarity(a: number[], b: number[]): number {
-    let dot = 0, normA = 0, normB = 0;
-    for (let i = 0; i < a.length; i++) {
-        dot += a[i] * b[i]; normA += a[i] * a[i]; normB += b[i] * b[i];
-    }
-    return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+    let dot = 0, na = 0, nb = 0;
+    for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+    return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
 ```
 
-### Generic Model Caller
+---
+
+## Complete production examples
+
+### YOLO detection handler
 
 ```typescript
-const ENDPOINT = 'https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference';
-
-async function callModel(name: string, version: string, input: any, ctx: any): Promise<any> {
-    return retry(async () => {
-        const res = await ctx.fetch(ENDPOINT, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: { bucket: 1338, name, version }, input })
-        });
-        if (!res.ok) throw new Error(`${name} failed: ${res.status}`);
-        return res.json();
-    });
-}
-```
-
-## Complete Production Examples
-
-### YOLO Object Detection Handler
-
-```typescript
-const ENDPOINT = 'https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference';
-
-async function retry(action: () => Promise<any>, retries = 3): Promise<any> {
-    for (let i = 0; i < retries; i++) {
-        try { return await action(); }
-        catch (error) { if (i === retries - 1) throw error; }
-    }
-}
-
-async function handle(event: any, ctx: any) {
+async function handle(event: any, context: any) {
     const { image } = event.payload;
+    if (!image) throw new Error('Missing image');
 
-    const data = await retry(async () => {
-        const res = await ctx.fetch(ENDPOINT, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: { bucket: 1338, name: 'yolo11x_1280', version: 'v1.0.0' },
-                input: { image }
-            })
-        });
-        if (!res.ok) throw new Error(`YOLO failed: ${res.status}`);
-        return res.json();
-    });
+    const result = await context.models.yolo.infer({ image, confidence: 0.3 });
 
     return {
-        totalDetections: data.output.length,
-        detections: data.output,
-        processingTime: data.metrics.inferenceTimeMs
+        count: result.detections.length,
+        detections: result.detections,
+        status: result.status
     };
 }
 ```
 
-### Text Embedding Handler (Qwen3)
+### Embedding handler (normalized output)
 
 ```typescript
-const ENDPOINT = 'https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference';
-
-async function retry(action: () => Promise<any>, retries = 3): Promise<any> {
-    for (let i = 0; i < retries; i++) {
-        try { return await action(); }
-        catch (error) { if (i === retries - 1) throw error; }
-    }
-}
-
 function l2Normalize(vector: number[]): number[] {
-    const norm = Math.sqrt(vector.reduce((sum, val) => sum + val * val, 0));
-    return norm === 0 ? vector.slice() : vector.map(val => val / norm);
+    const norm = Math.sqrt(vector.reduce((s, v) => s + v * v, 0));
+    return norm === 0 ? vector.slice() : vector.map(v => v / norm);
 }
 
-async function handle(event: any, ctx: any) {
+async function handle(event: any, context: any) {
     const { text } = event.payload;
-    if (!text) throw new Error('Missing text input');
+    if (!text) throw new Error('Missing text');
 
-    const data = await retry(async () => {
-        const res = await ctx.fetch(ENDPOINT, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: { bucket: 1338, name: 'qwen3-embedding-4b', version: 'v1.0.0' },
-                input: { text }
-            })
-        });
-        if (!res.ok) throw new Error(`Embedding failed: ${res.status}`);
-        return res.json();
+    const { embedding, dimensions } = await context.models.embedding.infer({
+        text,
+        dimensions: 768
     });
 
-    return { embedding: l2Normalize(data.output.embedding) };
+    return { embedding: l2Normalize(embedding), dimensions };
 }
 ```
 
-### Dual-Model Sentiment Handler (Parallel)
+### Dual-model sentiment (parallel, fault-tolerant)
 
 ```typescript
-const ENDPOINT = 'https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference';
-
-const SENTIMENT_LABEL_MAP: Record<string, number> = {
+const SENTIMENT_SCORE: Record<string, number> = {
     'Very Negative': -1, 'Negative': -0.5, 'Neutral': 0, 'Positive': 0.5, 'Very Positive': 1
 };
 
-async function retry(action: () => Promise<any>, retries = 3): Promise<any> {
-    for (let i = 0; i < retries; i++) {
-        try { return await action(); }
-        catch (error) { if (i === retries - 1) throw error; }
-    }
-}
-
-async function callModel(name: string, version: string, input: any, ctx: any): Promise<any> {
-    return retry(async () => {
-        const res = await ctx.fetch(ENDPOINT, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: { bucket: 1338, name, version }, input })
-        });
-        if (!res.ok) throw new Error(`${name} failed: ${res.status}`);
-        return res.json();
-    });
-}
-
-async function handle(event: any, ctx: any) {
+async function handle(event: any, context: any) {
     const { text } = event.payload;
 
-    const [emotionData, sentimentData] = await Promise.all([
-        callModel('emotion-english-distilroberta-base', 'v1.0.2', { text }, ctx)
-            .catch(() => ({ output: { label: 'neutral', confidence: 0 } })),
-        callModel('multilingual-sentiment-analysis', 'v1.0.0', { text }, ctx)
-            .catch(() => ({ output: { label: 'Neutral', confidence: 0 } }))
+    const [emotion, sentiment] = await Promise.all([
+        context.models.emotionClassifier.infer({ text })
+            .catch((e: any) => { context.log('emotion failed:', e.message); return { label: 'neutral', confidence: 0 }; }),
+        context.models.sentimentAnalysis.infer({ text })
+            .catch((e: any) => { context.log('sentiment failed:', e.message); return { label: 'Neutral', confidence: 0 }; })
     ]);
 
     return {
-        sentiment: SENTIMENT_LABEL_MAP[sentimentData.output.label] ?? 0,
-        sentimentConfidence: sentimentData.output.confidence,
-        emotion: emotionData.output.label,
-        emotionConfidence: emotionData.output.confidence
+        sentiment: SENTIMENT_SCORE[sentiment.label] ?? 0,
+        sentimentLabel: sentiment.label,
+        sentimentConfidence: sentiment.confidence,
+        emotion: emotion.label,
+        emotionConfidence: emotion.confidence
     };
 }
 ```
 
+### Streaming chat handler (LLM)
+
+```typescript
+async function handle(event: any, context: any) {
+    const { prompt } = event.payload;
+    if (!prompt) throw new Error('Missing prompt');
+
+    let text = '';
+    for await (const chunk of context.models.mistral7b.stream({
+        prompt,
+        max_tokens: 800,
+        temperature: 0.3
+    })) {
+        text += chunk.text ?? '';
+    }
+
+    return { text };
+}
+```
+
+---
+
 ## Related Skills
 
-- **coding**: Handler signature, runtime API, orchestration patterns, topology generation
-- **cli**: Config schema, deploy commands, environment setup
-- **storage**: Storing inference results persistently
+- **coding**: Handler signature, `CEFContext` shape, orchestration patterns (concierge, stream processor, fan-out, pipeline), `context.image.*` for crop/resize/encode
+- **cli**: `cef.config.yaml` schema, deploy commands, `cef dev`, naming conventions
+- **storage**: Persisting inference results, `sqlite-vec` for embedding search, per-entity instance isolation
+- **clientsdk**: Sending events with payloads that inference handlers will consume
