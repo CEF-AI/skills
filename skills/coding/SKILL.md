@@ -834,7 +834,7 @@ async function handle(event: any, context: any) {
 ### Object Detection
 
 ```yaml
-agentServicePubKey: "0x..."
+agentServicePubKey: "<64-char hex>"
 engagements:
   - name: "Detection Orchestrator"
     file: ./engagements/orchestrator.ts
@@ -874,7 +874,7 @@ workspaces:
 ### NLP Pipeline
 
 ```yaml
-agentServicePubKey: "0x..."
+agentServicePubKey: "<64-char hex>"
 engagements:
   - name: "NLP Orchestrator"
     file: ./engagements/orchestrator.ts
@@ -924,7 +924,7 @@ workspaces:
 ### Data Sync
 
 ```yaml
-agentServicePubKey: "0x..."
+agentServicePubKey: "<64-char hex>"
 engagements:
   - name: "Sync Orchestrator"
     file: ./engagements/orchestrator.ts
@@ -965,7 +965,7 @@ workspaces:
 ### Real-Time Analytics
 
 ```yaml
-agentServicePubKey: "0x..."
+agentServicePubKey: "<64-char hex>"
 engagements:
   - name: "Analytics Orchestrator"
     file: ./engagements/orchestrator.ts

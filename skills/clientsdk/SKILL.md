@@ -43,6 +43,9 @@ const client = new ClientSdk({
     url: "https://orchestrator.compute.test.ddcdragon.com",
     garUrl: "https://gar.compute.test.ddcdragon.com/",
     eventRuntimeUrl: "https://events.compute.test.ddcdragon.com",  // required
+    agentRuntimeUrl: "https://agent.compute.test.ddcdragon.com",
+    webTransportUrl: "https://sis-0.compute.test.ddcdragon.com:4433",
+    sisUrl: "https://sis.compute.test.ddcdragon.com",
     context,
     wallet,
 });
@@ -93,6 +96,9 @@ const AGENT_SERVICE = "0xc3d62ac...";
 const BASE_URL = "https://orchestrator.compute.test.ddcdragon.com";
 const GAR_URL = "https://gar.compute.test.ddcdragon.com/";
 const EVENT_RUNTIME_URL = "https://events.compute.test.ddcdragon.com";
+const AGENT_RUNTIME_URL = "https://agent.compute.test.ddcdragon.com";
+const WEB_TRANSPORT_URL = "https://sis-0.compute.test.ddcdragon.com:4433";
+const SIS_URL = "https://sis.compute.test.ddcdragon.com";
 const STREAM_ID = "stream-f493c12e";
 const WORKSPACE = "2456";
 
@@ -116,6 +122,9 @@ async function main() {
         url: BASE_URL,
         garUrl: GAR_URL,
         eventRuntimeUrl: EVENT_RUNTIME_URL,
+        agentRuntimeUrl: AGENT_RUNTIME_URL,
+        webTransportUrl: WEB_TRANSPORT_URL,
+        sisUrl: SIS_URL,
         context,
         wallet,
     });
@@ -396,13 +405,14 @@ try {
 
 ```typescript
 interface ClientConfig {
-    url: string;                    // Cluster / orchestrator URL
+    url: string;                    // Orchestrator URL
     garUrl?: string;                // GAR endpoint (required for agreements)
-    eventRuntimeUrl?: string;       // Event push URL — required (SDK cannot derive it from cluster URL)
-    agentRuntimeUrl?: string;       // Agent runtime URL — optional override
+    eventRuntimeUrl?: string;       // Event push URL (required; SDK cannot derive from orchestrator URL)
+    agentRuntimeUrl?: string;       // Agent runtime URL
+    webTransportUrl?: string;       // WebTransport URL (for stream subscriptions)
+    sisUrl?: string;                // SIS URL
     context: ClientContext;         // Agent service + workspace + stream
     wallet: SignedWallet | EmbedWallet;
-    webTransport?: { ... };        // Optional WebTransport config
 }
 
 interface ContextInput {

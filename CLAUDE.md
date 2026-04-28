@@ -23,7 +23,8 @@ There is no application code, no build step, no tests. The repo contains only Ma
     ├── cli/                   # Config & deploy: cef.config.yaml schema, CLI commands, env vars
     ├── coding/                # Runtime API, handler signature, CEFContext, V8 constraints, orchestration patterns, topology generation
     ├── inference/             # ML models: Qwen2-VL, Qwen3, Whisper, emotion, sentiment, YOLO, plate; calling patterns
-    └── storage/               # Storage: SQLite query/exec, migrations, sqlite-vec, state patterns
+    ├── storage/               # Storage: SQLite query/exec, migrations, sqlite-vec, state patterns
+    └── widgets/               # Cere Sandbox widgets: WidgetSandbox/WidgetRuntime contract, manifest, rendering, local testing
 ```
 
 Each skill is a single `SKILL.md` with YAML frontmatter (`name`, `description`) that determines when the AI tool loads it.
@@ -39,6 +40,7 @@ Each skill owns its domain content exactly once. Other skills cross-reference ra
 | Handler signature, CEFContext, entity hierarchy, orchestration patterns, topology generation | coding |
 | Model catalog, inference endpoints, request/response formats | inference |
 | Cubby API (query/exec), migrations, sqlite-vec, state patterns | storage |
+| Sandbox widget contract (WidgetSandbox/WidgetRuntime), manifest shape, rendering approaches, local testing | widgets |
 
 ## Critical Domain Constraint
 
