@@ -366,7 +366,7 @@ Engagements live under deployments. A deployment activates an engagement on a st
 ### Root
 
 ```yaml
-agentServicePubKey: "0x..."   # REQUIRED; hex public key from ROB or create-service
+agentServicePubKey: "<64-char hex>"   # REQUIRED; 64-char hex pubkey from ROB or create-service, no 0x prefix
 agentServiceId: "2620"        # Auto-resolved, written back after deploy
 ```
 
@@ -450,7 +450,7 @@ Rafts are defined under streams. A raft file must export `onInit()`, `onData()`,
 Simplest possible deployment; a single engagement with no agents:
 
 ```yaml
-agentServicePubKey: "0x..."
+agentServicePubKey: "<64-char hex>"
 
 engagements:
   - name: "My Handler"
@@ -488,12 +488,20 @@ Loaded from `.env` in the config file directory (or `--output-dir` for clone).
 
 ### Environment URL Reference
 
+All test net services. Inference is currently on devnet, not test net.
+
 | Service | URL |
 |-|-|
 | Orchestrator | `https://orchestrator.compute.test.ddcdragon.com` |
 | ROB UI | `https://rob.compute.test.ddcdragon.com/` |
 | ROB API | `https://rob.compute.test.ddcdragon.com/rms-node-backend` |
 | GAR | `https://gar.compute.test.ddcdragon.com/` |
+| Agent Runtime | `https://agent.compute.test.ddcdragon.com` |
+| Events | `https://events.compute.test.ddcdragon.com` |
+| Resource Manager | `https://resources.compute.test.ddcdragon.com` |
+| SIS | `https://sis.compute.test.ddcdragon.com` |
+| WebTransport | `https://sis-0.compute.test.ddcdragon.com:4433` |
+| Inference (devnet) | `https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference` |
 
 ## All Flags Reference
 
