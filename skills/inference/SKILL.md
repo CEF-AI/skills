@@ -82,7 +82,7 @@ Multimodal model for image understanding, visual Q&A, and text-only chat. Suppor
 | max_tokens | number | No | 2048 | Max tokens to generate |
 | temperature | number | No | 0.8 | Sampling temperature |
 
-**Output schema:** `{ response: string }`
+**Output schema:** `{ output: { text: string } }`
 
 **Handler usage:**
 
@@ -154,7 +154,7 @@ Instruction-aware embeddings. Supports 100+ languages.
 
 **Input schema:** `{ text: string }` (required)
 
-**Output schema:** `{ embedding: number[] }`
+**Output schema:** `{ output: { embedding: number[] } }`
 
 **Handler usage:**
 
@@ -217,7 +217,7 @@ Multilingual transcription with timestamps.
 
 **Input schema:** `{ audio: string }` (required; URL or base64-encoded audio, WAV/MP3)
 
-**Output schema:** `{ text: string, chunks: Array<{ text: string, timestamp: number[] }> }`
+**Output schema:** `{ output: { text: string, chunks: Array<{ text: string, timestamp: number[] }> } }`
 
 **Handler usage:**
 
@@ -283,7 +283,7 @@ Labels: anger, disgust, fear, joy, neutral, sadness, surprise.
 
 **Input schema:** `{ text: string }` (required)
 
-**Output schema:** `{ label: string, confidence: number, scores: Record<string, number> }`
+**Output schema:** `{ output: { label: string, confidence: number, scores: Record<string, number> } }`
 
 **Handler usage:**
 
@@ -348,7 +348,7 @@ Labels: Very Negative, Negative, Neutral, Positive, Very Positive. Supports 16+ 
 
 **Input schema:** `{ text: string }` (required)
 
-**Output schema:** `{ label: string, confidence: number, scores: Record<string, number> }`
+**Output schema:** `{ output: { label: string, confidence: number, scores: Record<string, number> } }`
 
 **Handler usage:**
 
@@ -418,7 +418,7 @@ General object detection (COCO classes).
 
 **Input schema:** `{ image: string }` (required; URL or base64)
 
-**Output schema:** `{ detections: Array<{ label: string, score: number, box: { xmin, ymin, xmax, ymax } }> }`
+**Output schema:** `{ output: Array<{ label: string, score: number, box: { xmin, ymin, xmax, ymax } }> }`
 
 **Handler usage:**
 
@@ -479,7 +479,7 @@ Detects license plates in images. Outputs bounding boxes and optionally a `plate
 
 **Input schema:** `{ image: string }` (required; URL or base64)
 
-**Output schema:** `{ detections: Array<{ label: string, score: number, box: object }> }`
+**Output schema:** `{ output: { detections: Array<{ label: string, score: number, box: object }>, plate_image?: string } }`
 
 **Handler usage:**
 
@@ -545,7 +545,7 @@ Reads text from license plate images. Best used after `yolo-plate-detector` crop
 
 **Input schema:** `{ image: string }` (required; URL or base64)
 
-**Output schema:** `{ plate: string, avg_confidence: number }`
+**Output schema:** `{ output: { plate: string, avg_confidence: number } }`
 
 **Handler usage:**
 
