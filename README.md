@@ -5,7 +5,7 @@ AI coding skills for building agent services on the [CEF AI](https://cef.ai) sta
 ## Install
 
 ```bash
-bunx skills add cef-ai/skills
+npx skills add cef-ai/skills
 ```
 
 ## Skills
