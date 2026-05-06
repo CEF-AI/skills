@@ -1,6 +1,6 @@
 ---
 name: cef-cli
-description: Use when working with cef.config.yaml, deploying agent services, checking deployment status, cloning existing services, configuring workspaces/streams/deployments/rafts, setting up environment variables, local development with cef dev, testing with playground, deleting entities, or understanding the full development lifecycle from idea to deployment to teardown. Covers config schema, all CLI commands and flags, deploy/delete order, entity decision guide, ID writeback, naming conventions, selector conditions, and JSON Schema format for parameters/returns.
+description: Use when working with cef.config.yaml, deploying agent services, checking deployment status, cloning existing services, authenticating the CLI (cef login / whoami / logout), setting up environment variables or URL overrides, local development with cef dev, testing with playground, deleting entities, or understanding the full development lifecycle from idea to deployment to teardown. Covers config schema, all CLI commands and flags, browser-based auth, deploy/delete order, entity decision guide, ID writeback, naming conventions, selector conditions, and JSON Schema format for parameters/returns.
 ---
 
 # CEF CLI
@@ -16,6 +16,18 @@ npx @cef-ai/cli --help       # Or run directly
 
 ## CLI Commands
 
+### Authentication
+
+Most commands that hit the orchestrator or ROB require auth. The primary path is browser-based:
+
+```bash
+cef login     # Opens a browser, saves the token to ~/.cef/credentials.json
+cef whoami    # Show current auth status
+cef logout    # Clear stored credentials
+```
+
+No `.env` is needed for the default stage environment. `cef dev` does not require auth or any environment variables. To override URLs or supply a token in CI, see **Environment Variables** below.
+
 ### deploy (default)
 
 Creates or updates all entities from config. IDs are written back after each entity type completes (crash recovery).
@@ -26,6 +38,10 @@ cef deploy --config ./app/cef.config.yaml         # Explicit config path
 cef deploy --dry-run                              # Preview without calling API
 cef deploy --only agent                           # Deploy single entity type
 ```
+
+> **Prefer `--only` for iterative deploys.** A bare `cef deploy` validates all workspace IDs against the orchestrator. If a workspace was created outside the orchestrator API (e.g. via ROB UI), the CLI logs a warning but keeps the existing ID. For routine handler/agent updates, use `cef deploy --only engagement` or `cef deploy --only agent` to skip workspace validation entirely.
+
+> **`--only engagement` side effect:** Every run creates an extra "Mock Workspace YYYY-MM-DD" workspace as a CLI test artifact. Clean these up after each deploy: `DELETE $CEF_ORCHESTRATOR_URL/api/v1/agent-services/$PUBKEY/workspaces/{id}` — the orphaned workspace ID appears in `GET .../workspaces`.
 
 `--only` types: `engagement`, `agent`, `cubby`, `workspace`, `stream`, `deployment`, `raft`
 
@@ -120,6 +136,9 @@ This is the reverse of deploy order. You must delete dependents first. For examp
 Starts a local development server with full runtime emulation. No auth or environment variables required.
 
 ```bash
+# ⚠️ If `cef dev` from PATH produces no output and exits silently, use the full path:
+node /path/to/global/node_modules/@cef-ai/cli/dist/cli.js dev --config cef.config.yaml
+
 cef dev                             # Start at default port 8787
 cef dev --config ./my-agent/cef.config.yaml  # Custom config
 cef dev --port 3000                 # Custom port
@@ -156,8 +175,10 @@ cef dev --persist                   # Keep .cef-dev/ data after server stops
 | `/api/cubbies/:alias/exec` | POST | SQL write. Body: `{ "sql": "INSERT ...", "params": [], "instanceId": "default" }` |
 | `/api/cubbies/:alias/instances` | GET | List cubby instances |
 | `/api/topology` | GET | View topology JSON |
-| `/api/executions` | GET | Get execution logs |
+| `/api/executions` | GET | Get all execution logs |
 | `/ws` | WS | Real-time logs and trace events |
+
+**Note:** There is no `/api/executions/:id` endpoint to poll for a specific execution's result. After triggering via `/api/trigger`, check the cubby for expected state changes or watch the WebSocket (`/ws`) for completion events.
 
 ### playground test
 
@@ -357,7 +378,7 @@ Engagements live under deployments. A deployment activates an engagement on a st
 ### Root
 
 ```yaml
-agentServicePubKey: "0x..."   # REQUIRED; hex public key from ROB or create-service
+agentServicePubKey: "<64-char hex>"   # REQUIRED; 64-char hex pubkey from ROB or create-service, no 0x prefix
 agentServiceId: "2620"        # Auto-resolved, written back after deploy
 ```
 
@@ -389,9 +410,13 @@ agents:
           properties:
             detections: { type: array }
           type: object
+        batch_file: ./agents/object-detection/eval.sql   # Optional. Local-dev only.
+        batch_cubby: detection_store                     # Optional. Local-dev only.
 ```
 
 When `parameters` or `returns` are omitted, they default to `{ properties: {}, type: "object" }`.
+
+`batch_file` and `batch_cubby` are local-dev-only and not sent to the orchestrator. When both are set, the `cef dev` UI shows a "Run Batch" button on the task panel: it runs the SQL from `batch_file` against `batch_cubby` and calls the task once per result row.
 
 ### Cubbies
 
@@ -441,7 +466,7 @@ Rafts are defined under streams. A raft file must export `onInit()`, `onData()`,
 Simplest possible deployment; a single engagement with no agents:
 
 ```yaml
-agentServicePubKey: "0x..."
+agentServicePubKey: "<64-char hex>"
 
 engagements:
   - name: "My Handler"
@@ -466,16 +491,33 @@ workspaces:
 
 ## Environment Variables
 
-Loaded from `.env` in the config file directory (or `--output-dir` for clone).
+Run `cef login` for normal use; the CLI reads the saved token from `~/.cef/credentials.json`. The variables below are URL overrides and a CI/non-interactive auth fallback. They are loaded from `.env` in the config file directory (or `--output-dir` for clone) when present.
 
-| Variable | Required | Description |
+| Variable | When to set | Default / Description |
 |-|-|-|
-| `CEF_AUTH_TOKEN` | Yes (all API commands) | Bearer JWT (same as ROB UI) |
-| `CEF_ORCHESTRATOR_URL` | Yes (deploy, status, clone, delete) | e.g. `https://compute-1.devnet.ddc-dragon.com/orchestrator` |
-| `CEF_ROB_API_URL` | Yes (services, create-service, workspace/cubby ops) | e.g. `https://api.rob.dev.cere.io/rms-node-backend` |
-| `CEF_ROB_ORIGIN` | No | Override Origin/Referer header; auto-detected if unset |
+| `CEF_AUTH_TOKEN` | CI / non-interactive only | Bearer JWT. When set, takes precedence over `~/.cef/credentials.json`. Most users should use `cef login` instead. |
+| `CEF_ORCHESTRATOR_URL` | Override only | Defaults to `https://orchestrator.compute.test.ddcdragon.com` |
+| `CEF_ROB_API_URL` | Override only | Defaults to `https://rob-api.compute.test.ddcdragon.com/rms-node-backend` |
+| `CEF_ROB_ORIGIN` | Rare override | Origin/Referer header; auto-derived from `CEF_ROB_API_URL` if unset |
 
-**Note:** `cef dev` does not require any environment variables.
+**Note:** `cef dev` does not require auth or any environment variables.
+
+### Environment URL Reference
+
+All test net services. Inference is currently on devnet, not test net.
+
+| Service | URL |
+|-|-|
+| Orchestrator | `https://orchestrator.compute.test.ddcdragon.com` |
+| ROB UI | `https://rob.compute.test.ddcdragon.com/` |
+| ROB API | `https://rob-api.compute.test.ddcdragon.com/rms-node-backend` |
+| GAR | `https://gar.compute.test.ddcdragon.com/` |
+| Agent Runtime | `https://agent.compute.test.ddcdragon.com` |
+| Events | `https://events.compute.test.ddcdragon.com` |
+| Resource Manager | `https://resources.compute.test.ddcdragon.com` |
+| SIS | `https://sis.compute.test.ddcdragon.com` |
+| WebTransport | `https://sis-0.compute.test.ddcdragon.com:4433` |
+| Inference (devnet) | `https://compute-5.devnet.ddc-dragon.com/inference/api/v1/inference` |
 
 ## All Flags Reference
 
@@ -508,6 +550,8 @@ Loaded from `.env` in the config file directory (or `--output-dir` for clone).
 | Engagement | Title Case | N/A | N/A |
 
 Example: Agent "Object Detection" -> alias `objectDetection` -> directory `object-detection`
+
+> **`alias` must be a valid JavaScript identifier.** Hyphens are rejected at deploy time with `INVALID_ALIAS`. `my-agent` → invalid; `myAgent` → valid. This applies to both agent aliases and task aliases, since they map to `ctx.agents.myAgent.myTask()` in handler code.
 
 ## Selector Conditions
 
@@ -562,11 +606,11 @@ Rules:
 
 ## Full Development Lifecycle
 
-### 1. Create the agent service
+### 1. Authenticate, then create the agent service
 
 ```bash
-cef service create --name my-agent
-# Returns agentServicePubKey and agentServiceId
+cef login                            # Browser-based; saves token to ~/.cef/credentials.json
+cef service create --name my-agent   # Returns agentServicePubKey and agentServiceId
 ```
 
 ### 2. Set up project structure
@@ -575,7 +619,7 @@ cef service create --name my-agent
 mkdir my-agent && cd my-agent
 ```
 
-Create `cef.config.yaml` with the returned `agentServicePubKey`. Create `.env` with `CEF_AUTH_TOKEN`, `CEF_ORCHESTRATOR_URL`, `CEF_ROB_API_URL`. Create `engagements/` and `agents/` directories per the directory convention above.
+Create `cef.config.yaml` with the returned `agentServicePubKey`. Create `engagements/` and `agents/` directories per the directory convention above. No `.env` is needed for the default stage environment; only create one to override URLs (`CEF_ORCHESTRATOR_URL`, `CEF_ROB_API_URL`) or to supply `CEF_AUTH_TOKEN` in CI.
 
 ### 3. Develop locally
 
@@ -636,8 +680,20 @@ cef deploy delete --only deployment
 cef deploy delete --only stream
 ```
 
+## Troubleshooting
+
+| Symptom | Fix |
+|-|-|
+| `Not authenticated` on deploy | Run `cef login`. Check `cef whoami` to confirm. |
+| `require is not defined` / `import is not supported` in handler | V8 sandbox — all handler code must be inline in a single file. See **coding**. |
+| Cubby data disappears after restarting `cef dev` | `.cef-dev/` is wiped on shutdown by default. Use `cef dev --persist`. |
+| `Not available in local dev mode` from a raft query | Expected — rafts aren't emulated locally. Deploy and test with `cef playground test`. |
+| Deploy fails with 404 on update | The entity ID in config points to something already deleted. Clear the `*Id` field for that entity and re-run `cef deploy` to recreate. |
+| Delete or deploy hangs in CI | Some operations prompt for confirmation; pass `--force` in non-interactive shells. |
+
 ## Related Skills
 
-- **coding**: Handler signature, runtime API, entity hierarchy, orchestration patterns, topology generation
-- **inference**: ML model catalog and calling patterns
-- **storage**: Storage API and state management
+- **coding**: Handler signature, Context API (`context.models/.agents/.cubbies/.streams/.rafts/.image/.emit/.fetch/.workspace/.log`), entity hierarchy, orchestration patterns, topology generation
+- **inference**: `context.models.<alias>.infer/.stream` + full 16-model catalog (yolo, yoloXL, whisper*, llm, mistral*, qwenVision, llamaVision, qwenCoder, embedding, emotionClassifier, sentimentAnalysis, plateDetector, plateOcr)
+- **storage**: Cubby API, SQL patterns, `sqlite-vec` vector search
+- **clientsdk**: Sending events/streams from external code into CEF

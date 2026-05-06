@@ -36,9 +36,16 @@ const wallet = {
 };
 
 // 3. SDK instance
+// ⚠️ eventRuntimeUrl is REQUIRED: the orchestrator returns 404 on stream lookup;
+// the SDK cannot derive the event push URL from the cluster URL. Omitting it means
+// every client.event.create() call fails with a 404, silently or not at all.
 const client = new ClientSdk({
-    url: "https://compute-1.devnet.ddc-dragon.com",
-    garUrl: "https://gar.compute.dev.ddcdragon.com/",  // GAR endpoint for agreements
+    url: "https://orchestrator.compute.test.ddcdragon.com",
+    garUrl: "https://gar.compute.test.ddcdragon.com/",
+    eventRuntimeUrl: "https://events.compute.test.ddcdragon.com",  // required
+    agentRuntimeUrl: "https://agent.compute.test.ddcdragon.com",
+    webTransportUrl: "https://sis-0.compute.test.ddcdragon.com:4433",
+    sisUrl: "https://sis.compute.test.ddcdragon.com",
     context,
     wallet,
 });
@@ -86,8 +93,12 @@ Most integrations follow this pattern: create an agreement (once), then send eve
 const { ClientSdk, ClientContext, JsonSigner } = require("@cef-ai/client-sdk");
 
 const AGENT_SERVICE = "0xc3d62ac...";
-const BASE_URL = "https://compute-1.devnet.ddc-dragon.com";
-const GAR_URL = "https://gar.compute.dev.ddcdragon.com/";
+const BASE_URL = "https://orchestrator.compute.test.ddcdragon.com";
+const GAR_URL = "https://gar.compute.test.ddcdragon.com/";
+const EVENT_RUNTIME_URL = "https://events.compute.test.ddcdragon.com";
+const AGENT_RUNTIME_URL = "https://agent.compute.test.ddcdragon.com";
+const WEB_TRANSPORT_URL = "https://sis-0.compute.test.ddcdragon.com:4433";
+const SIS_URL = "https://sis.compute.test.ddcdragon.com";
 const STREAM_ID = "stream-f493c12e";
 const WORKSPACE = "2456";
 
@@ -110,6 +121,10 @@ async function main() {
     const client = new ClientSdk({
         url: BASE_URL,
         garUrl: GAR_URL,
+        eventRuntimeUrl: EVENT_RUNTIME_URL,
+        agentRuntimeUrl: AGENT_RUNTIME_URL,
+        webTransportUrl: WEB_TRANSPORT_URL,
+        sisUrl: SIS_URL,
         context,
         wallet,
     });
@@ -190,6 +205,46 @@ try {
         // Already exists, safe to continue
     } else {
         throw err;
+    }
+}
+```
+
+### Agreement Expiry (24h TTL)
+
+Agreements expire after their TTL (default 24 hours). Long-running ingest jobs that span multiple hours will fail when the agreement expires. The error message is `"No agreement exists between user and agent service"` but it may not surface clearly if errors are being swallowed.
+
+**Reset pattern for long-running ingests:**
+
+```typescript
+let clientReady = false;
+
+async function ensureAgreement(client: ClientSdk) {
+    if (clientReady) return;
+    try {
+        await client.agreement.create(AGENT_SERVICE, {
+            metadata: {
+                scopes: [{
+                    context: { workspace_id: WORKSPACE, stream_id: STREAM_ID },
+                }],
+            },
+        }, 86400);
+    } catch (err) {
+        if (!err.message?.includes("409")) throw err;
+    }
+    clientReady = true;
+}
+
+async function sendEvent(client: ClientSdk, eventType: string, payload: unknown) {
+    try {
+        await client.event.create(eventType, payload);
+    } catch (err) {
+        if (err.message?.includes("No agreement exists")) {
+            clientReady = false;
+            await ensureAgreement(client);
+            await client.event.create(eventType, payload);
+        } else {
+            throw err;
+        }
     }
 }
 ```
@@ -350,11 +405,14 @@ try {
 
 ```typescript
 interface ClientConfig {
-    url: string;                    // Cluster URL
+    url: string;                    // Orchestrator URL
     garUrl?: string;                // GAR endpoint (required for agreements)
+    eventRuntimeUrl?: string;       // Event push URL (required; SDK cannot derive from orchestrator URL)
+    agentRuntimeUrl?: string;       // Agent runtime URL
+    webTransportUrl?: string;       // WebTransport URL (for stream subscriptions)
+    sisUrl?: string;                // SIS URL
     context: ClientContext;         // Agent service + workspace + stream
     wallet: SignedWallet | EmbedWallet;
-    webTransport?: { ... };        // Optional WebTransport config
 }
 
 interface ContextInput {
