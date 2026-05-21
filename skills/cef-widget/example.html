@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Users</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      @keyframes rise {
+        from { opacity: 0; transform: translateY(12px) scale(0.98); }
+        to   { opacity: 1; transform: translateY(0)    scale(1); }
+      }
+      @keyframes shimmer {
+        0%   { background-position: -400px 0; }
+        100% { background-position:  400px 0; }
+      }
+      @keyframes pulse-ring {
+        0%   { transform: scale(0.95); opacity: 0.6; }
+        70%  { transform: scale(1.4);  opacity: 0;   }
+        100% { transform: scale(1.4);  opacity: 0;   }
+      }
+      .rise      { animation: rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+      .skeleton  { background: linear-gradient(90deg, #1f2937 0%, #374151 40%, #1f2937 80%); background-size: 800px 100%; animation: shimmer 1.4s linear infinite; }
+      .ring-dot::after {
+        content: ''; position: absolute; inset: 0; border-radius: 9999px;
+        border: 2px solid currentColor; animation: pulse-ring 1.6s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+      }
+    </style>
+  </head>
+  <body class="bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100 min-h-screen antialiased">
+    <main class="mx-auto max-w-5xl px-6 py-10">
+      <header class="mb-8 flex items-end justify-between gap-4">
+        <div>
+          <h1 id="title" class="text-3xl font-semibold tracking-tight">Users</h1>
+          <p id="subtitle" class="mt-1 text-sm text-slate-400">Loading…</p>
+        </div>
+        <span id="badge" class="hidden rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-300 ring-1 ring-emerald-500/30"></span>
+      </header>
+
+      <section id="app">
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div class="skeleton h-24 rounded-2xl"></div>
+          <div class="skeleton h-24 rounded-2xl"></div>
+          <div class="skeleton h-24 rounded-2xl"></div>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+      const initials = (name) => {
+        const parts = String(name ?? '').trim().split(/\s+/).filter(Boolean);
+        if (!parts.length) return '·';
+        return (parts[0][0] + (parts[1]?.[0] ?? '')).toUpperCase();
+      };
+
+      const hueFromKey = (key) => {
+        let h = 0;
+        const s = String(key ?? '');
+        for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+        return h % 360;
+      };
+
+      const pickField = (cols, candidates) => {
+        const lower = cols.map((c) => String(c).toLowerCase());
+        for (const cand of candidates) {
+          const i = lower.indexOf(cand);
+          if (i !== -1) return i;
+        }
+        return -1;
+      };
+
+      const renderEmpty = (msg) => {
+        document.getElementById('app').innerHTML = `
+          <div class="rounded-2xl border border-slate-800 bg-slate-900/40 p-10 text-center">
+            <p class="text-slate-300">${esc(msg)}</p>
+          </div>`;
+      };
+
+      const renderError = (err) => {
+        document.getElementById('app').innerHTML = `
+          <div class="rounded-2xl border border-rose-900/60 bg-rose-950/40 p-6">
+            <p class="text-sm font-medium text-rose-200">Failed to load users</p>
+            <pre class="mt-2 whitespace-pre-wrap break-words text-xs text-rose-300/80">${esc(err)}</pre>
+          </div>`;
+      };
+
+      const renderUsers = (columns, rows) => {
+        if (!rows.length) return renderEmpty('No users found.');
+
+        const nameIdx   = pickField(columns, ['name', 'full_name', 'display_name', 'username', 'user', 'email']);
+        const emailIdx  = pickField(columns, ['email', 'mail']);
+        const roleIdx   = pickField(columns, ['role', 'title', 'position', 'job', 'group']);
+        const statusIdx = pickField(columns, ['status', 'state', 'active']);
+        const idIdx     = pickField(columns, ['id', 'user_id', 'uid', 'address']);
+
+        const extraIdxs = columns
+          .map((_, i) => i)
+          .filter((i) => ![nameIdx, emailIdx, roleIdx, statusIdx, idIdx].includes(i));
+
+        const cards = rows.map((row, i) => {
+          const name   = nameIdx   !== -1 ? row[nameIdx]   : `User ${i + 1}`;
+          const email  = emailIdx  !== -1 ? row[emailIdx]  : null;
+          const role   = roleIdx   !== -1 ? row[roleIdx]   : null;
+          const status = statusIdx !== -1 ? row[statusIdx] : null;
+          const id     = idIdx     !== -1 ? row[idIdx]     : null;
+
+          const hue = hueFromKey(id ?? name ?? i);
+          const avatar = `linear-gradient(135deg, hsl(${hue}, 70%, 55%), hsl(${(hue + 40) % 360}, 70%, 45%))`;
+
+          const statusText = String(status ?? '').toLowerCase();
+          const isOnline = ['online', 'active', 'true', '1', 'ok'].includes(statusText);
+          const statusColor = isOnline ? 'text-emerald-400' : status != null ? 'text-slate-400' : '';
+
+          const extras = extraIdxs.slice(0, 4).map((idx) => `
+            <div class="min-w-0">
+              <p class="truncate text-[10px] uppercase tracking-wider text-slate-500">${esc(columns[idx])}</p>
+              <p class="truncate text-xs text-slate-300">${esc(row[idx])}</p>
+            </div>`).join('');
+
+          return `
+            <article class="rise group relative overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/50 p-4 backdrop-blur transition hover:-translate-y-0.5 hover:border-slate-700 hover:bg-slate-900/80" style="animation-delay:${Math.min(i * 40, 600)}ms">
+              <div class="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-br opacity-0 transition group-hover:opacity-100" style="background-image: radial-gradient(600px circle at 0% 0%, hsla(${hue}, 60%, 50%, 0.10), transparent 40%)"></div>
+              <div class="flex items-start gap-3">
+                <div class="relative h-11 w-11 shrink-0 rounded-full text-sm font-semibold text-white shadow-inner flex items-center justify-center" style="background:${avatar}">
+                  ${esc(initials(name))}
+                  ${status != null ? `<span class="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-slate-900 ${isOnline ? 'bg-emerald-400 ring-dot' : 'bg-slate-500'}"></span>` : ''}
+                </div>
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center justify-between gap-2">
+                    <h3 class="truncate text-sm font-semibold text-slate-100">${esc(name)}</h3>
+                    ${status != null ? `<span class="shrink-0 text-[10px] font-medium uppercase tracking-wider ${statusColor}">${esc(status)}</span>` : ''}
+                  </div>
+                  ${email != null ? `<p class="mt-0.5 truncate text-xs text-slate-400">${esc(email)}</p>` : ''}
+                  ${role  != null ? `<p class="mt-1 inline-block rounded-md bg-slate-800/70 px-1.5 py-0.5 text-[10px] font-medium text-slate-300">${esc(role)}</p>` : ''}
+                </div>
+              </div>
+              ${extras ? `<div class="mt-3 grid grid-cols-2 gap-2 border-t border-slate-800 pt-3">${extras}</div>` : ''}
+            </article>`;
+        }).join('');
+
+        document.getElementById('app').innerHTML = `
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">${cards}</div>`;
+      };
+
+      async function boot() {
+        try {
+          const sb = window.WidgetSandbox;
+          if (!sb?.manifestUrl || !window.WidgetRuntime?.query) {
+            throw new Error('window.WidgetSandbox / WidgetRuntime not available. Preview this widget through the Cere Sandbox.');
+          }
+
+          const { columns, rows, meta, manifest } = await window.WidgetRuntime.query(sb.manifestUrl);
+
+          const title = manifest?.query?.label || manifest?.name || 'Users';
+          document.getElementById('title').textContent = title;
+          document.getElementById('subtitle').textContent =
+            `${rows.length} ${rows.length === 1 ? 'user' : 'users'} • ${meta.rowsRead} rows • ${Math.round(meta.duration)} ms`;
+
+          const badge = document.getElementById('badge');
+          badge.textContent = `live`;
+          badge.classList.remove('hidden');
+
+          renderUsers(columns, rows);
+        } catch (err) {
+          document.getElementById('subtitle').textContent = 'Error';
+          renderError(err?.message ?? String(err));
+        }
+      }
+
+      void boot();
+    </script>
+  </body>
+</html>
