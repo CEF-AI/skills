@@ -12,12 +12,9 @@ npx skills add cef-ai/skills
 
 | Skill | Description |
 |-|-|
-| **clientsdk** | Connect external code to CEF via `@cef-ai/client-sdk`: send events, query cubbies, subscribe to streams |
-| **cli** | Config schema, deploy/delete/clone commands, local dev server (`cef dev`), local automated testing, playground testing, environment variables, naming conventions |
-| **coding** | Handler signature, Context API (`context.models/.agents/.cubbies/.streams/.rafts/.image/.emit/.fetch/.workspace/.log`), entity hierarchy, V8 constraints, orchestration patterns, topology generation |
-| **inference** | `context.models.<alias>.infer/.stream` and the 16-model catalog (yolo, yoloXL, whisper, whisperTiny, whisperLarge, llm, mistral7b, mistralSmall, qwenCoder, qwenVision, llamaVision, embedding, emotionClassifier, sentimentAnalysis, plateDetector, plateOcr) — per-model input/output schemas, streaming usage, and production examples |
-| **storage** | Cubby API (SQLite query/exec, migrations, sqlite-vec), state machine, dedup, SQL patterns |
-| **widgets** | Build Cere Sandbox widgets that visualize cubby data in ROB: WidgetSandbox / WidgetRuntime contract, manifest shape, custom vs auto-mount rendering, multi-file ES module limits, local testing, troubleshooting checklist |
+| **cef-agent** | CEF vault agent anatomy: V8 isolate runtime, `ctx.*` API, event handling, cubby reads/writes, async-without-`setTimeout` patterns, `@cef-ai/agent-sdk` configuration |
+| **cef-client** | Browser companion: Cere wallet connect, Vault SDK init, publishing events to an agent, polling the agent's cubby for results |
+| **cef-widget** | Cere Sandbox widget folders: `window.WidgetSandbox` / `window.WidgetRuntime` contract, manifest shape, parent-bridged wallet signing, publish/archive flows |
 
 ## How It Works
 
